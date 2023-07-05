@@ -1,0 +1,22 @@
+{
+    "input_length": 350,
+    "output_length": 350,
+    "num_train_epochs": 8,
+    "output_dir": "outputs/T5_large_recentnews(full)_baseline_online",
+    "dataset": "recentnews",
+    "dataset_version": "full",
+    "train_batch_size": 5,
+    "stream_mini_batch_size": 20000,
+    "learning_rate": 1e-3,
+    "model": "google/t5-large-ssm",
+    "method": "baseline",
+    "freeze_level": 0,
+    "gradient_accumulation_steps": 3,
+    "ngpu": 2,
+    "accelerator": "ddp",
+    "use_deepspeed": false,
+    "mode": "pretrain",
+    "use_lr_scheduling": true,
+    "check_validation": false,
+    "checkpoint_path": ""
+}

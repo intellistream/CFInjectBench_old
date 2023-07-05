@@ -1,0 +1,11 @@
+transformers==4.12.3
+pytorch-lightning==1.3.8
+pandas
+numpy
+nlp==0.4.0
+sentencepiece==0.1.94
+nltk
+deepspeed
+datasets
+rouge
+torchmetrics==0.6.0
