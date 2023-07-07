@@ -25,7 +25,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', default=None, type=str)
     parser.add_argument('--model', default=None, type=str)
+
     arg_ = parser.parse_args()
+
     if arg_.config is None:
         raise NameError("Include a config file in the argument please.")
 
@@ -111,6 +113,6 @@ if __name__ == '__main__':
     else:
         if os.path.exists(args.output_dir):
             shutil.rmtree(args.output_dir)
-
-        set_seed(40)
+        print(args)
+        set_seed(42)
         train(args, Model)
