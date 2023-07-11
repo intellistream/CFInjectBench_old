@@ -167,32 +167,11 @@ def evaluate(args, model_checkpoint, Model):
 
 
 
-def dtw_distance(traj1, traj2):
-    n = len(traj1)
-    m = len(traj2)
-
-    # 创建一个二维矩阵来保存DTW距离
-    dtw_matrix = np.zeros((n + 1, m + 1))
-
-    # 初始化第一行和第一列的值为无穷大
-    dtw_matrix[0, :] = np.inf
-    dtw_matrix[:, 0] = np.inf
-    dtw_matrix[0, 0] = 0
-
-    # 计算DTW距离
-    for i in range(1, n + 1):
-        for j in range(1, m + 1):
-            cost = distance(traj1[i - 1], traj2[j - 1])  # 计算两个点之间的距离
-            dtw_matrix[i, j] = cost + min(dtw_matrix[i - 1, j], dtw_matrix[i, j - 1], dtw_matrix[i - 1, j - 1])
-
-    return dtw_matrix[n, m]
-
-# 距离函数示例（可以根据实际需求替换为其他距离计算方法）
-def distance(point1, point2):
-    return np.linalg.norm(point1 - point2)  # 欧氏距离
+def ACC():
 
 
-def BWT()
+
+def
 
 
 
