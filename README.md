@@ -100,12 +100,3 @@ This is an example of performing continual pretraining on CC-RecentNews (main ex
 python run.py --config configs/full_setting/training/t5_kadapters.json
 ```
 
-## Reference
-```
-@article{jang2021towards,
-  title={Towards Continual Knowledge Learning of Language Models},
-  author={Jang, Joel and Ye, Seonghyeon and Yang, Sohee and Shin, Joongbo and Han, Janghoon and Kim, Gyeonghun and Choi, Stanley Jungkyu and Seo, Minjoon},
-  journal={arXiv preprint arXiv:2110.03215},
-  year={2021}
-}
-```
