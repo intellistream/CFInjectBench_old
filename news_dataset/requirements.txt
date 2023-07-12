@@ -1,0 +1,6 @@
+pandas
+matplotlib
+setuptools
+wheel
+spacy[cuda-autodetect]
+gdown
