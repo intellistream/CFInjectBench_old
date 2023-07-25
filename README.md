@@ -100,3 +100,24 @@ This is an example of performing continual pretraining on CC-RecentNews (main ex
 python run.py --config configs/full_setting/training/t5_kadapters.json
 ```
 
+## Testing 
+
+1. Download dataset.
+
+```
+sh Download_dataset
+```
+
+2. Change configurations of training methods (if required).
+
+3. Test desired method.
+
+- stream_opt = [day, month, quarter]
+- method = [baseline, kadapters, lora, mixreview, modular_small, recadam]
+
+```
+python3 run.py --config configs/online/wiki/{stream_opt}/t5_{method}.json
+
+```
+
+> NOTE: eval metrics and prediction outputs will be saved to `log/wiki/{stream_opt}/{method}/` (by default) for each CKL phase and test set.

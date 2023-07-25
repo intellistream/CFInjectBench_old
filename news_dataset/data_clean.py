@@ -186,7 +186,7 @@ def clean_text(text):
     return text.strip()
 
 
-df = pd.read_csv('data.csv', parse_dates=['timestamp'])
+df = pd.read_csv('data.csv')
 df.drop_duplicates(subset=['text'], inplace=True, ignore_index=True)
 
 df['text'] = df['text'].apply(clean_text)

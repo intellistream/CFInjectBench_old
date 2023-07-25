@@ -3,12 +3,11 @@
 import re
 import string
 import torch
+import pandas as pd
 import pytorch_lightning as pl
 
-from torch.utils.data import RandomSampler
+from torch.utils.data import RandomSampler, random_split
 from torch.utils.data import DataLoader, ConcatDataset
-from rouge import Rouge
-from collections import Counter
 from transformers import (
     Adafactor,
     T5Tokenizer,
@@ -23,7 +22,6 @@ from models.Kadapter_T52 import T5ForConditionalGeneration as T5_Kadapter2
 from models.Lora_T5 import T5ForConditionalGeneration as T5_Lora
 from models.Lora_T52 import T5ForConditionalGeneration as T5_Lora2
 from models.RecAdam import RecAdam
-from utils import load_dataset
 from dataset import CKLDataset
 
 
@@ -33,8 +31,8 @@ class T5(pl.LightningModule):
         self.save_hyperparameters(hparams)
         self.dataset = None
 
-        self.mix_ratio = 4
-        self.mix_decay = 0.7
+        self.mem_buff = None
+        self.mem_ratio = 0.1
         self.epoch = 0
 
         model_mapping = {
@@ -65,7 +63,7 @@ class T5(pl.LightningModule):
                 hparams.model_name_or_path)
 
         self.tokenizer = T5Tokenizer.from_pretrained(
-            hparams.tokenizer_name_or_path)
+            hparams.model_name_or_path)
 
         # Freezing only encoder or the whole model
         if hparams.freeze_level == 0:  # Do not freeze any parameters
@@ -93,6 +91,25 @@ class T5(pl.LightningModule):
 
     def set_dataset(self, dataset):
         self.dataset = dataset
+        if self.hparams.method == 'mixreview':
+            self.dataset = self.set_memory_buffer()
+
+        self.train_set, self.val_set = random_split(self.dataset, [0.8, 0.2])
+
+    def set_memory_buffer(self):
+        time_inv_relations = ['P19', 'P20', 'P279', 'P37', 'P449', 'P47', 'P138', 'P364', 'P527', 'P176', 'P27', 'P407', 'P30',
+                              'P178', 'P1376', 'P131', 'P1412', 'P17', 'P276', 'P937', 'P140', 'P103', 'P190', 'P1001', 'P495', 'P36', 'P740', 'P361']
+
+        temp = self.dataset.dataset[self.dataset.dataset['relation'].isin(
+            time_inv_relations)]
+
+        if self.mem_buff is None:
+            self.mem_buff = temp
+            return self.dataset
+
+        self.mem_buff = pd.concat([self.mem_buff, temp], ignore_index=True)
+
+        return ConcatDataset([self.dataset, CKLDataset(self.mem_buff.sample(frac=self.mem_ratio, ignore_index=True), 'train', self.tokenizer, self.hparams, True)])
 
     def normalize_answer(self, s):
         """Lower text and remove punctuation, articles and extra whitespace."""
@@ -111,6 +128,7 @@ class T5(pl.LightningModule):
             return text.lower()
 
         def rid_of_specials(text):
+            text = text.replace('_X_', '')
             text = text.replace("<extra_id_0>", "")
             text = text.replace("<extra_id_1>", "")
             return text
@@ -122,26 +140,6 @@ class T5(pl.LightningModule):
 
     def accuracy_match_score(self, prediction, ground_truth):
         return int(prediction.strip() == ground_truth.strip())
-
-    def _rougel_score(self, prediction, ground_truth):
-        # no normalization
-        try:
-            scores = Rouge().get_scores(prediction, ground_truth, avg=True)
-        except ValueError:  # "Hypothesis is empty."
-            return 0.0
-        return scores["rouge-l"]["f"]
-
-    def _f1_score(self, prediction, ground_truth):
-        prediction_tokens = self.normalize_answer(prediction).split()
-        ground_truth_tokens = self.normalize_answer(ground_truth).split()
-        common = Counter(prediction_tokens) & Counter(ground_truth_tokens)
-        num_same = sum(common.values())
-        if num_same == 0:
-            return 0
-        precision = 1.0 * num_same / len(prediction_tokens)
-        recall = 1.0 * num_same / len(ground_truth_tokens)
-        f1 = (2 * precision * recall) / (precision + recall)
-        return f1
 
     def calculate_scores(self, predictions, ground_truths):
         em_score = 0
@@ -155,42 +153,6 @@ class T5(pl.LightningModule):
         em_score /= len(predictions)
         accuracy /= len(predictions)
         return em_score*100, accuracy*100
-
-    # def calculate_scores_multipleanswers(self, predictions, ground_truths, ids):
-    #     em_score = 0
-    #     accuracy_score = 0
-
-    #     for idx, pred in enumerate(predictions):
-    #         unique_id = ids[idx]
-    #         answers = self.ids_to_answers[unique_id]
-    #         em_correct = False
-    #         accuracy_correct = False
-    #         for answer in answers:
-    #             if self.accuracy_match_score(pred, answer):
-    #                 accuracy_correct = True
-    #             if self.exact_match_score(pred, answer):
-    #                 em_correct = True
-    #         if accuracy_correct:
-    #             accuracy_score += 1
-    #         if em_correct:
-    #             em_score += 1
-
-    #     accuracy_score /= len(predictions)
-    #     em_score /= len(predictions)
-    #     return em_score*100, accuracy_score*100
-
-    # def calculate_rouge_multipleanswers(self, predictions, ground_truths, ids):
-    #     rouge_score = 0
-    #     for idx, pred in enumerate(predictions):
-    #         unique_id = ids[idx]
-    #         answers = self.ids_to_answers[unique_id]
-    #         rouge_score += max(self._rougel_score(pred, answer)
-    #                            for answer in answers)
-    #     rouge_score /= len(predictions)
-    #     return rouge_score*100
-
-    def calculate_f1_scores(self, predictions, ground_truths, ids):
-        return sum(self._f1_score(pred, gt) for pred, gt in zip(predictions, ground_truths)) * 100 / len(predictions)
 
     def freeze_params(self, model):
         for par in model.parameters():
@@ -245,10 +207,6 @@ class T5(pl.LightningModule):
 
         preds = self.ids_to_clean_text(generated_ids)
         targets = self.ids_to_clean_text(batch["target_ids"])
-        ids = batch["label_ids"]
-        source = self.ids_to_clean_text(batch["source_ids"])
-        print("preds", preds)
-        print("targets", targets)
 
         loss = self._step(batch)
 
@@ -257,32 +215,13 @@ class T5(pl.LightningModule):
 
         em_score = 0
         accuracy = 0
-        rouge_score = 0
-        f1_score = 0
 
-        if self.hparams.dataset in ['TriviaQA', 'zsRE', 'TREX', 'NQ', 'HotpotQA']:
-            em_score, accuracy = self.calculate_scores_multipleanswers(
-                preds, targets, ids)
-        elif self.hparams.dataset == 'ELI5':
-            rouge_score = self.calculate_rouge_multipleanswers(
-                preds, targets, ids)
-        elif self.hparams.dataset == 'WOW':
-            f1_score = self.calculate_f1_scores(preds, targets, ids)
-        else:
-            em_score, accuracy = self.calculate_scores(preds, targets)
+        em_score, accuracy = self.calculate_scores(preds, targets)
 
         em_score = torch.tensor(em_score, dtype=torch.float32)
         accuracy = torch.tensor(accuracy, dtype=torch.float32)
-        rouge_score = torch.tensor(rouge_score, dtype=torch.float32)
-        f1_score = torch.tensor(f1_score, dtype=torch.float32)
-        if self.hparams.dataset == 'ELI5':
-            self.log('rouge_score', rouge_score, prog_bar=True, logger=True)
-        elif self.hparams.dataset == 'WOW':
-            self.log('f1_score', f1_score, prog_bar=True, logger=True)
-        elif self.hparams.dataset in ['fever', 'AY2', 'TREX', 'zsRE']:
-            self.log('accuracy', accuracy, prog_bar=True, logger=True)
-        else:
-            self.log('em_score', em_score, prog_bar=True, logger=True)
+
+        self.log('em_score', em_score, prog_bar=True, logger=True)
 
     def training_step(self, batch, batch_idx):
         loss = self._step(batch)
@@ -290,16 +229,7 @@ class T5(pl.LightningModule):
         return loss
 
     def on_train_epoch_start(self):
-        if self.hparams.method == 'mixreview':
-            train_set = self.train_dataloader().dataset
         self.epoch += 1
-
-    def on_train_end(self):
-        if self.hparams.mode == 'pretrain':
-            if self.hparams.method == 'recadam':
-                self.pretrained_model = self.model
-            elif self.hparams.method in ['kadapter', 'lora', 'modular_small']:
-                self.model.save_pretrained(self.hparams.output_dir)
 
     def validation_step(self, batch, batch_idx):
         return self._generative_step(batch, batch_idx)
@@ -372,55 +302,20 @@ class T5(pl.LightningModule):
             optimizer = Adafactor(optimizer_grouped_parameters,
                                   lr=self.hparams.learning_rate, scale_parameter=False, relative_step=False)
 
-        # self.optimizer = optimizer
         if self.hparams.use_lr_scheduling:
             denomniator = (self.hparams.n_gpu *
                            self.hparams.gradient_accumulation_steps) // 3
-            if self.hparams.dataset_version == 'full':
-                # Do not decay learning rate to 0 for full set
-                denomniator = (self.hparams.n_gpu *
-                               self.hparams.gradient_accumulation_steps) // 2
-            steps_per_epoch = (312520 // denomniator) + 1
+            steps_per_epoch = (len(self.dataset) // denomniator) + 1
             lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=self.hparams.learning_rate, steps_per_epoch=steps_per_epoch,
                                                                pct_start=0.1, epochs=self.hparams.num_train_epochs, anneal_strategy='linear', cycle_momentum=False)
             return [optimizer], [{"scheduler": lr_scheduler, "interval": "step", "name": "learning rate"}]
         return [optimizer]
 
     def train_dataloader(self):
-        if self.hparams.method == 'mixreview':
-            mix_len = int(len(self.dataset) * self.mix_ratio *
-                          (self.mix_decay ** self.epoch))
-            pretrain_dataset , _= load_dataset('pretrain', self.hparams, mix_len)
-            pretrain_dataset = CKLDataset(
-                pretrain_dataset, 'pretrain', self.tokenizer, self.hparams)
-            mixed_dataset = ConcatDataset([self.dataset, pretrain_dataset])
-
-            sampler = RandomSampler(mixed_dataset)
-            dataloader = DataLoader(mixed_dataset, sampler=sampler, batch_size=self.hparams.train_batch_size,
-                                    drop_last=True, num_workers=self.hparams.num_workers)
-
-        # elif self.hparams.split_num == 2:
-        #     train_dataset = self.get_dataset(
-        #         tokenizer=self.tokenizer, type_path="split", args=self.hparams)
-        #     sampler = RandomSampler(train_dataset)
-        #     dataloader = DataLoader(train_dataset, sampler=sampler,  batch_size=self.hparams.train_batch_size,
-        #                             drop_last=True, num_workers=self.hparams.num_workers)
-        else:
-            sampler = RandomSampler(self.dataset)
-            dataloader = DataLoader(self.dataset, sampler=sampler,  batch_size=self.hparams.train_batch_size,
-                                    drop_last=True, num_workers=self.hparams.num_workers)
+        sampler = RandomSampler(self.train_set)
+        dataloader = DataLoader(self.train_set, sampler=sampler,  batch_size=self.hparams.train_batch_size,
+                                drop_last=True, num_workers=self.hparams.num_workers)
         return dataloader
 
     def val_dataloader(self):
-        if self.hparams.mode == 'pretrain':
-            return None
-        validation_dataset = self.get_dataset(
-            tokenizer=self.tokenizer, type_path="validation", args=self.hparams)
-
-        return DataLoader(validation_dataset, batch_size=self.hparams.eval_batch_size, num_workers=self.hparams.num_workers, shuffle=False)
-
-    def test_dataloader(self):
-        test_dataset = self.get_dataset(
-            tokenizer=self.tokenizer, type_path="test", args=self.hparams)
-
-        return DataLoader(test_dataset, batch_size=self.hparams.eval_batch_size, num_workers=self.hparams.num_workers, shuffle=False)
+        return DataLoader(self.val_set, batch_size=self.hparams.train_batch_size, num_workers=self.hparams.num_workers, shuffle=False)

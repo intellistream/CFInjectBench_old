@@ -1,51 +1,95 @@
 # pylint: disable=import-error
 
+import os
+import csv
+import shutil
 import time
 import pytorch_lightning as pl
 
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from transformers import T5Tokenizer
+from collections import deque
 
 from dataset import CKLDataset
+from online_evaluation import evaluate
 from utils import load_dataset
 
 
 def train(args, Model):
-    if args.mode in ['pretrain', 'finetune']:
-        stream_dataset, _ = load_dataset('train', args)
+    train_stream_df = load_dataset('train', args)
+    test_stream_df = load_dataset('test', args)
 
-    tokenizer = T5Tokenizer.from_pretrained(args.tokenizer_name_or_path)
+    tokenizer = T5Tokenizer.from_pretrained(args.model_name_or_path)
+
     model = Model(args)
 
     start_time = time.time()
-
     collector = []
 
     trainer = pl.Trainer(
         accumulate_grad_batches=args.gradient_accumulation_steps,
-        plugins='deepspeed_stage_2' if args.use_deepspeed else [],
-        gpus=args.n_gpu,
+        accelerator='gpu',
         max_epochs=args.num_train_epochs,
         precision=16 if args.use_deepspeed else 32,
-        amp_level=args.opt_level,
         gradient_clip_val=args.max_grad_norm,
-        checkpoint_callback=True,
         val_check_interval=args.val_check_interval,
         callbacks=[ModelCheckpoint(
-            dirpath=args.output_dir, save_top_k=-1, period=1)],
-        accelerator=args.accelerator,
+            dirpath=args.output_dir, save_top_k=-1)],
+        strategy='ddp'
     )
 
-    for idx, row in stream_dataset.iterrows():
-        collector.append(row.to_dict())
+    last_entry = None
 
-        if len(collector) >= args.stream_mini_batch_size or idx == len(stream_dataset) - 1:
+    bwt = []
+    acc = []
+    eval_time = []
 
-            model.set_dataset(CKLDataset(collector, 'train', tokenizer, args))
+    periods = deque(maxlen=2)
+
+    if os.path.exists(args.output_dir):
+        shutil.rmtree(args.output_dir)
+
+    for idx, row in train_stream_df.iterrows():
+        if last_entry and last_entry != row['date'] or idx == len(train_stream_df) - 1:
+            print('Training -', last_entry)
+
+            model.set_dataset(CKLDataset(
+                collector, 'train', tokenizer, args))
             trainer.fit(model)
-
-            trainer.max_epochs += (args.num_train_epochs - 1)
+            trainer.fit_loop.max_epochs += args.num_train_epochs
 
             collector = []
+            periods.append(last_entry)
 
-    print('Total time:', time.time() - start_time)
+            if trainer.global_rank == 0:
+                metrics, e_time = evaluate(
+                    args, model, test_stream_df[test_stream_df['date'].isin(periods)], tokenizer)
+
+                if len(periods) == 2:
+                    bwt.append(metrics[0] - acc[-1])
+                    print('BWT:', bwt[-1])
+
+                acc.append(metrics[-1])
+                eval_time.append(e_time)
+                print('ACC:', acc[-1])
+                print('TIME:', eval_time[-1])
+
+            trainer.strategy.barrier()
+
+        collector.append(row.to_dict())
+        last_entry = row['date']
+
+    if trainer.global_rank == 0:
+        total_time = time.time() - start_time
+        print('Total time:', total_time)
+
+        with open(f'{args.output_log}all.csv', 'w', newline='', encoding='utf-8') as writefile:
+            writer = csv.writer(writefile)
+            writer.writerows([acc, bwt, eval_time])
+
+        with open(f'{args.output_log}results.csv', 'w', newline='', encoding='utf-8') as writefile:
+            writer = csv.writer(writefile)
+            writer.writerow(['ACC', 'BWT', 'TIME'])
+            writer.writerow([sum(acc)/len(acc), sum(bwt)/len(bwt), total_time])
+
+    trainer.strategy.barrier()
