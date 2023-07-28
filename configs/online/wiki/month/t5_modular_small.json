@@ -2,7 +2,7 @@
     "input_length": 18,
     "output_length": 18,
     "num_train_epochs": 1,
-    "output_dir": "outputs/wiki/month/T5_large_modular_small_online",
+    "output_dir": "outputs/wiki/month/T5_base_modular_small_online",
     "dataset": "wiki",
     "dataset_version": "month",
     "train_batch_size": 8,
@@ -16,6 +16,6 @@
     "use_deepspeed": false,
     "use_lr_scheduling": false,
     "check_validation": false,
-    "checkpoint_path": "outputs/wiki/month/T5_large_modular_small_online",
+    "checkpoint_path": "outputs/wiki/month/T5_base_modular_small_online",
     "output_log": "log/wiki/month/modular_small/"
 }

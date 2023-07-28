@@ -1,11 +1,12 @@
 # pylint: disable=import-error
 
 import re
+import random
 import string
 import torch
-import pandas as pd
 import pytorch_lightning as pl
 
+from collections import deque
 from torch.utils.data import RandomSampler, random_split
 from torch.utils.data import DataLoader, ConcatDataset
 from transformers import (
@@ -16,11 +17,9 @@ from transformers import (
 
 from models.Modular_T5 import T5ForConditionalGeneration as T5_Modular
 from models.Modular_Small_T5 import T5ForConditionalGeneration as T5_Modular_Small
-from models.Modular_Small_T52 import T5ForConditionalGeneration as T5_Modular_Small2
-from models.Kadapter_T5 import T5ForConditionalGeneration as T5_Kadapter
-from models.Kadapter_T52 import T5ForConditionalGeneration as T5_Kadapter2
+from models.Kadapter_2_T5 import T5ForConditionalGeneration as T5_Kadapter2
+from models.Kadapter_3_T5 import T5ForConditionalGeneration as T5_Kadapter3
 from models.Lora_T5 import T5ForConditionalGeneration as T5_Lora
-from models.Lora_T52 import T5ForConditionalGeneration as T5_Lora2
 from models.RecAdam import RecAdam
 from dataset import CKLDataset
 
@@ -31,27 +30,21 @@ class T5(pl.LightningModule):
         self.save_hyperparameters(hparams)
         self.dataset = None
 
-        self.mem_buff = None
+        self.mem_buff = deque(maxlen=10000)
         self.mem_ratio = 0.1
         self.epoch = 0
 
         model_mapping = {
             'modular': T5_Modular,
             'modular_small': T5_Modular_Small,
-            'modular_small2': T5_Modular_Small2,
-            'kadapter': T5_Kadapter,
             'kadapter2': T5_Kadapter2,
+            'kadapter3': T5_Kadapter3,
             'lora': T5_Lora,
-            'lora2': T5_Lora2,
             'recadam': T5ForConditionalGeneration,
-            'recadam2': T5ForConditionalGeneration,
         }
 
         if hparams.method in model_mapping:
-            if hparams.method in ['modular_small2', 'kadapter2', 'lora2']:
-                hparams.model_name_or_path = (hparams.output_dir)[
-                    :len(hparams.output_dir)-1]
-            if hparams.method in ['recadam', 'recadam2']:
+            if hparams.method == 'recadam':
                 self.pretrained_model = model_mapping[hparams.method].from_pretrained(
                     hparams.model_name_or_path)
                 self.freeze_params(self.pretrained_model)
@@ -78,11 +71,7 @@ class T5(pl.LightningModule):
             for name, param in self.model.named_parameters():
                 if 'encoder_modular' in name:
                     param.requires_grad = True
-        elif hparams.method == 'modular_small2':
-            for name, param in self.model.named_parameters():
-                if 'encoder_modular2' in name or name == 'encoder_modular_projection':
-                    param.requires_grad = True
-        elif hparams.method in ['kadapter', 'lora', 'kadapter2', 'lora2']:
+        elif hparams.method in ['kadapter2', 'lora', 'kadapter3']:
             for name, param in self.model.named_parameters():
                 if hparams.method in name:
                     param.requires_grad = True
@@ -101,15 +90,15 @@ class T5(pl.LightningModule):
                               'P178', 'P1376', 'P131', 'P1412', 'P17', 'P276', 'P937', 'P140', 'P103', 'P190', 'P1001', 'P495', 'P36', 'P740', 'P361']
 
         temp = self.dataset.dataset[self.dataset.dataset['relation'].isin(
-            time_inv_relations)]
+            time_inv_relations)].sample(frac=self.mem_ratio)
 
-        if self.mem_buff is None:
-            self.mem_buff = temp
+        if len(self.mem_buff) == 0:
+            self.mem_buff.extend(temp.to_dict(orient='records'))
             return self.dataset
 
-        self.mem_buff = pd.concat([self.mem_buff, temp], ignore_index=True)
+        self.mem_buff.extend(temp.to_dict(orient='records'))
 
-        return ConcatDataset([self.dataset, CKLDataset(self.mem_buff.sample(frac=self.mem_ratio, ignore_index=True), 'train', self.tokenizer, self.hparams, True)])
+        return ConcatDataset([self.dataset, CKLDataset(random.sample(self.mem_buff, min(len(self.mem_buff), int(self.mem_ratio * len(self.dataset)))), 'train', self.tokenizer, self.hparams, True)])
 
     def normalize_answer(self, s):
         """Lower text and remove punctuation, articles and extra whitespace."""
