@@ -2,9 +2,6 @@ transformers==4.12.3
 pytorch-lightning==2.0.6
 pandas
 numpy
-nlp==0.4.0
 sentencepiece==0.1.94
 spacy
-nltk
 deepspeed
-torchmetrics==1.0.1
