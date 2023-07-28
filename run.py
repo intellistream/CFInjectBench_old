@@ -32,9 +32,7 @@ if __name__ == '__main__':
         hparam = json.load(config_file)
     hparam = argparse.Namespace(**hparam)
 
-    # Setting configurations
     args_dict = dict(
-        # Path to save the checkpoints
         output_dir=hparam.__dict__.get('output_dir'),
         dataset=hparam.dataset,
         dataset_version=hparam.dataset_version,
@@ -58,10 +56,7 @@ if __name__ == '__main__':
         num_workers=4 * hparam.ngpu,
         use_lr_scheduling=hparam.__dict__.get('use_lr_scheduling'),
         val_check_interval=1.0,
-        early_stop_callback=False,
         use_deepspeed=hparam.__dict__.get('use_deepspeed'),
-        opt_level='O1',  # you can find out more on optimisation levels here https://nvidia.github.io/apex/amp.html#opt-levels-and-properties
-        # if you enable 16-bit training then set this to a sensible value, 0.5 is a good default
         max_grad_norm=0.5,
         seed=42,
         check_validation_only=hparam.check_validation,

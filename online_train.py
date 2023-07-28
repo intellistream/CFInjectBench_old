@@ -38,13 +38,17 @@ def train(args, Model):
         strategy='ddp'
     )
 
-    last_entry = None
+    last_entry = None 
 
     bwt = []
     acc = []
     eval_time = []
 
     periods = deque(maxlen=2)
+
+    output_folder = ("/".join((args.output_log.split('/'))[:-1]))
+    if not os.path.isdir(output_folder):
+        os.makedirs(output_folder)
 
     if os.path.exists(args.output_dir):
         shutil.rmtree(args.output_dir)
@@ -85,11 +89,13 @@ def train(args, Model):
 
         with open(f'{args.output_log}all.csv', 'w', newline='', encoding='utf-8') as writefile:
             writer = csv.writer(writefile)
-            writer.writerows([acc, bwt, eval_time])
+            writer.writerows([acc,[0] + bwt, eval_time])
 
         with open(f'{args.output_log}results.csv', 'w', newline='', encoding='utf-8') as writefile:
             writer = csv.writer(writefile)
-            writer.writerow(['ACC', 'BWT', 'TIME'])
-            writer.writerow([sum(acc)/len(acc), sum(bwt)/len(bwt), total_time])
+            writer.writerow(['ACC', 'BWT', 'TIME', 'TRAIN_TIME'])
+            writer.writerow([sum(acc)/len(acc), sum(bwt)/len(bwt), total_time, total_time-sum(eval_time)])
 
     trainer.strategy.barrier()
+
+
