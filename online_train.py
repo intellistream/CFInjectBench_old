@@ -3,6 +3,7 @@
 import os
 import csv
 import shutil
+import torch
 import time
 import pytorch_lightning as pl
 
@@ -16,6 +17,9 @@ from utils import load_dataset
 
 
 def train(args, Model):
+
+    torch.set_float32_matmul_precision('medium')
+
     train_stream_df = load_dataset('train', args)
     test_stream_df = load_dataset('test', args)
 
@@ -38,7 +42,7 @@ def train(args, Model):
         strategy='ddp'
     )
 
-    last_entry = None 
+    last_entry = None
 
     bwt = []
     acc = []
@@ -89,13 +93,12 @@ def train(args, Model):
 
         with open(f'{args.output_log}all.csv', 'w', newline='', encoding='utf-8') as writefile:
             writer = csv.writer(writefile)
-            writer.writerows([acc,[0] + bwt, eval_time])
+            writer.writerows([acc, [0] + bwt, eval_time])
 
         with open(f'{args.output_log}results.csv', 'w', newline='', encoding='utf-8') as writefile:
             writer = csv.writer(writefile)
             writer.writerow(['ACC', 'BWT', 'TIME', 'TRAIN_TIME'])
-            writer.writerow([sum(acc)/len(acc), sum(bwt)/len(bwt), total_time, total_time-sum(eval_time)])
+            writer.writerow([sum(acc)/len(acc), sum(bwt)/len(bwt),
+                            total_time, total_time-sum(eval_time)])
 
     trainer.strategy.barrier()
-
-

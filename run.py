@@ -61,7 +61,10 @@ if __name__ == '__main__':
         seed=42,
         check_validation_only=hparam.check_validation,
         checkpoint_path=hparam.__dict__.get('checkpoint_path'),
-        output_log=hparam.__dict__.get('output_log')
+        output_log=hparam.__dict__.get('output_log'),
+        alpha=hparam.__dict__.get('alpha'),
+        temperature=hparam.__dict__.get('temperature'),
+        distil_epoch=hparam.__dict__.get('distil_epoch')
     )
 
     args = argparse.Namespace(**args_dict)

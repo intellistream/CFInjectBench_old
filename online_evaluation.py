@@ -17,8 +17,6 @@ def evaluate(args, model, df, tokenizer):
     stream_datasets = df.groupby('date')
     metrics = []
 
-    start_time = time.time()
-
     for date, stream_dataset in stream_datasets:
         total_cnt = 0
         em_correct_num = 0
@@ -26,6 +24,7 @@ def evaluate(args, model, df, tokenizer):
         collector = []
 
         print('Evaluating -', date)
+        start_time = time.time()
 
         stream_dataset.reset_index(inplace=True)
         # stream_dataset = stream_dataset.sample(frac=0.5)

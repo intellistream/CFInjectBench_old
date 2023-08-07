@@ -21,6 +21,7 @@ from models.Kadapter_2_T5 import T5ForConditionalGeneration as T5_Kadapter2
 from models.Kadapter_3_T5 import T5ForConditionalGeneration as T5_Kadapter3
 from models.Lora_T5 import T5ForConditionalGeneration as T5_Lora
 from models.RecAdam import RecAdam
+from models.KnowledgeDistilliation_T5 import StudentModel
 from dataset import CKLDataset
 
 
@@ -34,6 +35,8 @@ class T5(pl.LightningModule):
         self.mem_ratio = 0.1
         self.epoch = 0
 
+        self.teacher_model = None
+
         model_mapping = {
             'modular': T5_Modular,
             'modular_small': T5_Modular_Small,
@@ -41,6 +44,7 @@ class T5(pl.LightningModule):
             'kadapter3': T5_Kadapter3,
             'lora': T5_Lora,
             'recadam': T5ForConditionalGeneration,
+            'kd': T5ForConditionalGeneration
         }
 
         if hparams.method in model_mapping:
@@ -78,9 +82,9 @@ class T5(pl.LightningModule):
 
         self.output_dir = self.hparams.output_dir
 
-    def set_dataset(self, dataset):
+    def set_dataset(self, dataset, kd=False):
         self.dataset = dataset
-        if self.hparams.method == 'mixreview':
+        if kd or self.hparams.method == 'mixreview':
             self.dataset = self.set_memory_buffer()
 
         self.train_set, self.val_set = random_split(self.dataset, [0.8, 0.2])
@@ -200,7 +204,7 @@ class T5(pl.LightningModule):
         loss = self._step(batch)
 
         self.log('val_loss', loss, on_step=True,
-                 on_epoch=True, prog_bar=True, logger=True)
+                 on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
 
         em_score = 0
         accuracy = 0
@@ -210,11 +214,12 @@ class T5(pl.LightningModule):
         em_score = torch.tensor(em_score, dtype=torch.float32)
         accuracy = torch.tensor(accuracy, dtype=torch.float32)
 
-        self.log('em_score', em_score, prog_bar=True, logger=True)
+        self.log('em_score', em_score, prog_bar=True,
+                 logger=True, sync_dist=True)
 
     def training_step(self, batch, batch_idx):
         loss = self._step(batch)
-        self.log("loss", loss)
+        self.log("loss", loss, sync_dist=True)
         return loss
 
     def on_train_epoch_start(self):
@@ -308,3 +313,27 @@ class T5(pl.LightningModule):
 
     def val_dataloader(self):
         return DataLoader(self.val_set, batch_size=self.hparams.train_batch_size, num_workers=self.hparams.num_workers, shuffle=False)
+
+    def on_train_start(self):
+        if self.teacher_model:
+            self.model = self.teacher_model
+
+    def on_train_end(self):
+        if self.hparams.method == 'kd':
+            if not self.teacher_model:
+                self.teacher_model = self.model
+                return
+
+            self.set_dataset(self.dataset, kd=True)
+
+            student_model = StudentModel(
+                self.model, self.teacher_model, self.tokenizer, self.hparams.temperature, self.hparams.alpha, self.ids_to_clean_text, self.calculate_scores)
+
+            self.teacher_model = self.model
+
+            trainer = pl.Trainer(
+                max_epochs=self.hparams.distil_epoch, accelerator='gpu', strategy='ddp')
+            trainer.fit(student_model, self.train_dataloader(),
+                        self.val_dataloader())
+
+            self.model = student_model.model
