@@ -5,3 +5,4 @@ numpy
 sentencepiece==0.1.94
 spacy
 deepspeed
+gdown
