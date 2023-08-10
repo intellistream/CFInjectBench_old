@@ -53,6 +53,7 @@ class CKLDataset(Dataset):
                 target_ = example_batch['corpus']
                 # target_ = '<extra_id_0> ' + output_text # mlm
                 # input_ = input_ + ' <extra_id_0>'
+
             else:
                 input_ = example_batch['query'].split('_X_')[0].strip()
                 target_ = input_ + ' ' + example_batch['answer'] + '.'
@@ -60,9 +61,17 @@ class CKLDataset(Dataset):
                 # input_ = example_batch['query'].replace('_X_', '<extra_id_0>') # mlm
                 # target_ = '<extra_id_0> ' + example_batch['answer'] + '.'
 
-        source = self.tokenizer.batch_encode_plus([input_], max_length=self.input_length,
+        else:
+            if self.type_path == 'train':
+                input_ = example_batch['input']
+                target_ = example_batch['output']
+            else:
+                input_ = example_batch['query']
+                target_ = example_batch['ans']
+
+        source = self.tokenizer.batch_encode_plus([str(input_)], max_length=self.input_length,
                                                   padding='max_length', truncation=True, return_tensors="pt")
-        targets = self.tokenizer.batch_encode_plus([target_], max_length=self.output_length,
+        targets = self.tokenizer.batch_encode_plus([str(target_)], max_length=self.output_length,
                                                    padding='max_length', truncation=True, return_tensors="pt")
         return source, targets
 

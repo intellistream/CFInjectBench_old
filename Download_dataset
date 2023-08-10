@@ -15,3 +15,8 @@ unzip -q ${filename}
 rm ${filename}
 rm -rf ${folder_name}/__MACOSX
 cd
+
+# news dataset
+gdown --id 1n4TJgdbi4MbrSUwxAu61VZw9elGE0zRh
+unzip news_data.zip
+rm news_data.zip

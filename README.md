@@ -23,15 +23,16 @@ sh Download_dataset
 
 3. Run experiments:
 
+- dataset = [`wiki`, `news`]
 - version = [`day`, `month`, `quarter`]
-- method = [`vannila`, `kadapter_2`, `kadapter_3`, `lora`, `mixreview`, `modular`, `recadam`]
+- method = [`vannila`, `kadapter_2`, `kadapter_3`, `lora`, `mixreview`, `modular`, `recadam`, `kd`]
 
 ```
-python3 run.py --config configs/online/wiki/{version}/t5_{method}.json
+python3 run.py --config configs/online/{dataset}/{version}/t5_{method}.json
 
 ```
 
-Replace `{version}` and `{method}` with appropriate values from the provided options.
+Replace `{dataset}`, `{version}` and `{method}` with appropriate values from the provided options.
 
 #### Components in each configurations file
 - input_length (int) : the input sequence length
