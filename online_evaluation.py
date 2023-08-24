@@ -20,18 +20,18 @@ def evaluate(args, model, df, tokenizer):
 
     stream_datasets = df.groupby('date')
     metrics = []
-    dtw = 0
-
+    model_knowledge = []
+    world_knowledge = []
     start_time = time.time()
 
     for date, stream_dataset in stream_datasets:
         total_cnt = 0
         em_correct_num = 0
 
-        model_knowledge = []
-        world_knowledge = []
+
         collector = []
 
+        embedding_layer = model.model.get_input_embeddings()
         print('Evaluating -', date)
 
         stream_dataset.reset_index(inplace=True)
@@ -45,7 +45,7 @@ def evaluate(args, model, df, tokenizer):
                 loader = DataLoader(CKLDataset(collector, 'test', tokenizer,
                                     args), batch_size=args.eval_batch_size, shuffle=False)
 
-                for batch in tqdm(iter(loader), desc="Evaluate"):
+                for batch in iter(loader):
                     outs = model.model.generate(
                         batch["source_ids"].cuda(),
                         attention_mask=batch["source_mask"].cuda(),
@@ -67,22 +67,29 @@ def evaluate(args, model, df, tokenizer):
                         em_correct_num += model.exact_match_score(
                             predicted, ground_truth)
                     # ------------------------ DTW ------------------------
-                    outputs = model.model(input_ids=batch["source_ids"].cuda(), decoder_input_ids=batch['target_ids'].cuda())
+                    lm_labels = batch['target_ids']
+                    lm_labels[lm_labels[:, :] == -100] = 0
+
+                    with torch.no_grad():
+                        outputs = model.model(input_ids=batch['source_ids'].cuda(),
+                                              attention_mask=batch['source_mask'].cuda(),
+                                              labels=batch['target_ids'].cuda(),
+                                              decoder_attention_mask=batch['target_mask'].cuda(),
+                                              output_hidden_states=True)
+                        g_emb = embedding_layer(lm_labels.cuda())
                     p_emb = outputs.encoder_last_hidden_state
-                    p_emb = torch.mean(p_emb.detach(), dim=[1, 2]).cpu().numpy()
-                    embedding_layer = model.model.get_input_embeddings()
-                    g_emb = embedding_layer(batch['target_ids'].cuda())
-                    g_emb = torch.mean(g_emb.detach(), dim=[1, 2]).cpu().numpy()
-                    model_knowledge.extend(p_emb)
-                    world_knowledge.extend(g_emb)
+
+                    model_knowledge.extend(torch.mean(
+                        p_emb, dim=[1, 2]).cpu().numpy())
+                    world_knowledge.extend(torch.mean(
+                        g_emb, dim=[1, 2]).cpu().numpy())
                     # ------------------------ DTW ------------------------
 
                 collector = []
-        dtw, _ = fastdtw(np.array(model_knowledge).reshape(len(model_knowledge), 1),
-                             np.array(world_knowledge).reshape(len(world_knowledge), 1),
-                             dist=euclidean)
         metrics.append(100 * em_correct_num / total_cnt)
-
+    dtw, _ = fastdtw(np.array(model_knowledge).reshape(len(model_knowledge), 1),
+                     np.array(world_knowledge).reshape(len(world_knowledge), 1),
+                     dist=euclidean)
     model.train()
 
     return metrics, dtw, time.time() - start_time
