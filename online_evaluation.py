@@ -6,13 +6,14 @@ import torch
 from torch.utils.data import DataLoader
 from fastdtw import fastdtw
 from tqdm import tqdm
+import random
 import numpy as np
 from scipy.spatial.distance import euclidean
 
 from dataset import CKLDataset
 
 
-def evaluate(args, model, df, tokenizer):
+def evaluate(args, model, df, tokenizer, rank):
     torch.cuda.empty_cache()
 
     model.to('cuda')
@@ -20,6 +21,10 @@ def evaluate(args, model, df, tokenizer):
 
     stream_datasets = df.groupby('date')
     metrics = []
+
+    final_m_k = []
+    final_w_k = []
+
     model_knowledge = []
     world_knowledge = []
     start_time = time.time()
@@ -28,11 +33,14 @@ def evaluate(args, model, df, tokenizer):
         total_cnt = 0
         em_correct_num = 0
 
+        m_k = []
+        w_k = []
 
         collector = []
 
         embedding_layer = model.model.get_input_embeddings()
-        print('Evaluating -', date)
+        if rank == 0:
+            print('Evaluating -', date)
 
         stream_dataset.reset_index(inplace=True)
         # stream_dataset = stream_dataset.sample(frac=0.5)
@@ -42,6 +50,12 @@ def evaluate(args, model, df, tokenizer):
             collector.append(row)
             if idx == len(stream_dataset) - 1:
             # if len(collector) >= args.eval_batch_size or idx == len(stream_dataset) - 1:
+            #     # ====================== select random sample for evaluation ===========================
+            #     # 计算要挑选的数据数量
+            #     sample_size = int(len(collector) * 0.1)
+            #     # 随机挑选指定数量的数据
+            #     collector = random.sample(collector, sample_size)
+            #     # ======================= select random sample for evaluation ==========================
                 loader = DataLoader(CKLDataset(collector, 'test', tokenizer,
                                     args), batch_size=args.eval_batch_size, shuffle=False)
 
@@ -67,29 +81,49 @@ def evaluate(args, model, df, tokenizer):
                         em_correct_num += model.exact_match_score(
                             predicted, ground_truth)
                     # ------------------------ DTW ------------------------
+                    # outputs = model.model(input_ids=batch["source_ids"].cuda(), decoder_input_ids=batch['target_ids'].cuda())
+                    # p_emb = outputs.encoder_last_hidden_state
+                    # p_emb = torch.mean(p_emb.detach(), dim=[1, 2]).cpu().numpy()
+                    # embedding_layer = model.model.get_input_embeddings()
+                    # g_emb = embedding_layer(batch['target_ids'].cuda())
+                    # g_emb = torch.mean(g_emb.detach(), dim=[1, 2]).cpu().numpy()
+                    # model_knowledge.extend(p_emb)
+                    # world_knowledge.extend(g_emb)
                     lm_labels = batch['target_ids']
                     lm_labels[lm_labels[:, :] == -100] = 0
 
                     with torch.no_grad():
-                        outputs = model.model(input_ids=batch['source_ids'].cuda(),
-                                              attention_mask=batch['source_mask'].cuda(),
-                                              labels=batch['target_ids'].cuda(),
-                                              decoder_attention_mask=batch['target_mask'].cuda(),
-                                              output_hidden_states=True)
+                        outputs = model.model(
+                            input_ids=batch['source_ids'].cuda(),
+                            attention_mask=batch['source_mask'].cuda(),
+                            labels=batch['target_ids'].cuda(),
+                            decoder_attention_mask=batch['target_mask'].cuda(),
+                            output_hidden_states=True
+                        )
+
                         g_emb = embedding_layer(lm_labels.cuda())
+
                     p_emb = outputs.encoder_last_hidden_state
 
-                    model_knowledge.extend(torch.mean(
+                    m_k.extend(torch.mean(
                         p_emb, dim=[1, 2]).cpu().numpy())
-                    world_knowledge.extend(torch.mean(
+                    w_k.extend(torch.mean(
                         g_emb, dim=[1, 2]).cpu().numpy())
                     # ------------------------ DTW ------------------------
-
                 collector = []
+        # for calculate the forgetting and updating rate
+        model_knowledge.append(m_k)
+        world_knowledge.append(w_k)
+
+        # for calculate the final DTW
+        final_m_k.extend(m_k)
+        final_w_k.extend(w_k)
+
         metrics.append(100 * em_correct_num / total_cnt)
-    dtw, _ = fastdtw(np.array(model_knowledge).reshape(len(model_knowledge), 1),
-                     np.array(world_knowledge).reshape(len(world_knowledge), 1),
+    dtw, _ = fastdtw(np.array(final_m_k).reshape(len(final_m_k), 1),
+                     np.array(final_w_k).reshape(len(final_w_k), 1),
                      dist=euclidean)
+    knowledge = {"model":model_knowledge, "world":world_knowledge}
     model.train()
 
-    return metrics, dtw, time.time() - start_time
+    return metrics, dtw, knowledge, time.time() - start_time
