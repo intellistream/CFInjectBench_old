@@ -4,6 +4,7 @@ import re
 import random
 import string
 import torch
+import numpy as np
 import pytorch_lightning as pl
 
 from collections import deque
@@ -21,6 +22,8 @@ from models.Kadapter_2_T5 import T5ForConditionalGeneration as T5_Kadapter2
 from models.Kadapter_3_T5 import T5ForConditionalGeneration as T5_Kadapter3
 from models.Lora_T5 import T5ForConditionalGeneration as T5_Lora
 from models.RecAdam import RecAdam
+from models.Lossnet import LossNet
+
 from dataset import CKLDataset
 
 
@@ -33,6 +36,7 @@ class T5(pl.LightningModule):
         self.mem_buff = deque(maxlen=10000)
         self.mem_ratio = 0.1
         self.epoch = 0
+        self.coreset = hparams.coreset
 
         model_mapping = {
             'modular': T5_Modular,
@@ -53,7 +57,7 @@ class T5(pl.LightningModule):
                 hparams.model_name_or_path)
         else:
             self.model = T5ForConditionalGeneration.from_pretrained(
-                hparams.model_name_or_path)
+                hparams.model_name_or_path, output_hidden_states=True)
 
         self.tokenizer = T5Tokenizer.from_pretrained(
             hparams.model_name_or_path)
@@ -66,6 +70,10 @@ class T5(pl.LightningModule):
             self.freeze_params(self.model.get_encoder())
         elif hparams.freeze_level == 2:  # Freeze encoder and decoder
             self.freeze_params(self.model)
+
+        if hparams.coreset == "model":
+            self.coreset_ratio = hparams.coreset_ratio
+            self.lossnet = LossNet(depth=self.model.config.num_layers, input_dim=self.model.config.hidden_size)
 
         if hparams.method == 'modular_small':
             for name, param in self.model.named_parameters():
@@ -83,6 +91,8 @@ class T5(pl.LightningModule):
         if self.hparams.method == 'mixreview':
             self.dataset = self.set_memory_buffer()
 
+        # train_size = int(0.8 * len(self.dataset))
+        # val_size = len(self.dataset) - train_size
         self.train_set, self.val_set = random_split(self.dataset, [0.8, 0.2])
 
     def set_memory_buffer(self):
@@ -141,7 +151,7 @@ class T5(pl.LightningModule):
 
         em_score /= len(predictions)
         accuracy /= len(predictions)
-        return em_score*100, accuracy*100
+        return em_score * 100, accuracy * 100
 
     def freeze_params(self, model):
         for par in model.parameters():
@@ -164,17 +174,44 @@ class T5(pl.LightningModule):
         )
 
     def _step(self, batch):
-        lm_labels = batch["target_ids"]
-        lm_labels[lm_labels[:, :] == self.tokenizer.pad_token_id] = -100
-        outputs = self(
-            input_ids=batch["source_ids"],
-            attention_mask=batch["source_mask"],
-            lm_labels=lm_labels,
-            decoder_attention_mask=batch['target_mask']
-        )
+        if self.coreset == 'model':
+            lm_labels = batch["target_ids"]
+            lm_labels[lm_labels[:, :] == self.tokenizer.pad_token_id] = -100
 
-        loss = outputs[0]
-        return loss
+            target_loss = []
+            data_hidden_states = []
+            for idx in range(len(batch[list(batch.keys())[0]])):
+                outputs = self(
+                    input_ids=batch["source_ids"][idx].unsqueeze(0),
+                    attention_mask=batch["source_mask"][idx].unsqueeze(0),
+                    lm_labels=lm_labels[idx].unsqueeze(0),
+                    decoder_attention_mask=batch['target_mask'][idx].unsqueeze(0)
+                )
+                loss = outputs[0]
+                target_loss.append(loss)
+                data_hidden_states.append(outputs.encoder_hidden_states)
+
+            hidden_states_data = [[] for _ in range(self.model.config.num_layers + 1)] # hidden states + last hidden state
+
+            for hidden_states in data_hidden_states:
+                for i, hidden_state in enumerate(hidden_states):
+                    hidden_states_data[i].append(hidden_state.squeeze())
+            for i, data in enumerate(hidden_states_data):
+                hidden_states_data[i] = torch.stack(hidden_states_data[i])
+
+            target_loss = torch.stack(target_loss)
+            return target_loss, hidden_states_data
+        else:
+            lm_labels = batch["target_ids"]
+            lm_labels[lm_labels[:, :] == self.tokenizer.pad_token_id] = -100
+            outputs = self(
+                input_ids=batch["source_ids"],
+                attention_mask=batch["source_mask"],
+                lm_labels=lm_labels,
+                decoder_attention_mask=batch['target_mask']
+            )
+            loss = outputs[0]
+            return loss
 
     def ids_to_clean_text(self, generated_ids):
         gen_text = self.tokenizer.batch_decode(
@@ -197,10 +234,13 @@ class T5(pl.LightningModule):
         preds = self.ids_to_clean_text(generated_ids)
         targets = self.ids_to_clean_text(batch["target_ids"])
 
-        loss = self._step(batch)
+        if self.coreset == 'model':
+            loss, _ = self._step(batch)
+            loss = torch.mean(loss)
+        else:
+            loss = self._step(batch)
 
-        self.log('val_loss', loss, on_step=True,
-                 on_epoch=True, prog_bar=True, logger=True)
+        self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
 
         em_score = 0
         accuracy = 0
@@ -212,9 +252,81 @@ class T5(pl.LightningModule):
 
         self.log('em_score', em_score, prog_bar=True, logger=True)
 
+    def losspredloss(self, input, target, margin=1.0, reduction='mean'):
+        assert len(input) % 2 == 0, 'the batch size is not even.'
+        assert input.shape == input.flip(0).shape
+
+        input = (input - input.flip(0))[
+                :len(input) // 2]  # [l_1 - l_2B, l_2 - l_2B-1, ... , l_B - l_B+1], where batch_size = 2B
+        target = (target - target.flip(0))[:len(target) // 2]
+        target = target.detach()
+
+        one = 2 * torch.sign(torch.clamp(target, min=0)) - 1  # 1 operation which is defined by the authors
+
+        if reduction == 'mean':
+            loss = torch.sum(torch.clamp(margin - one * input, min=0))
+            loss = loss / input.size(0)  # Note that the size of input is already halved
+        elif reduction == 'none':
+            loss = torch.clamp(margin - one * input, min=0)
+        else:
+            NotImplementedError()
+
+        return loss
+
     def training_step(self, batch, batch_idx):
-        loss = self._step(batch)
-        self.log("loss", loss)
+        if self.coreset == 'model':
+            self.model.eval()
+            self.lossnet.eval()
+            uncertainty = torch.tensor([]).cuda()
+            num = int(len(batch[ list(batch.keys())[0]]) * self.coreset_ratio)
+            uncertainty = torch.tensor([]).cuda()
+            with torch.no_grad():
+                lm_labels = batch["target_ids"]
+                lm_labels[lm_labels[:, :] == self.tokenizer.pad_token_id] = -100
+                outputs = self(
+                    input_ids=batch["source_ids"],
+                    attention_mask=batch["source_mask"],
+                    lm_labels=lm_labels,
+                    decoder_attention_mask=batch['target_mask']
+                )
+                pred_loss = self.lossnet(outputs.encoder_hidden_states)  # pred_loss = criterion(scores, labels) # ground truth loss
+                pred_loss = pred_loss.view(pred_loss.size(0))
+
+                uncertainty = torch.cat((uncertainty, pred_loss), 0)
+            # Index in ascending order
+            arg = np.argsort(uncertainty.cpu())[-num:]  # return the index starting from the smallest
+            new_batch = {}
+            for key in batch.keys():
+                new_batch[key] = [batch[key][i] for i in arg]
+                if key != 'date':
+                    new_batch[key] = torch.stack(new_batch[key])
+            self.model.train()
+            self.lossnet.train()
+
+            t_loss, hidden_states = self._step(new_batch)
+            loss_logit = self.lossnet(hidden_states)
+            loss_logit = loss_logit.view(loss_logit.size(0))
+            predloss = self.losspredloss(loss_logit, t_loss)
+            target_loss = torch.mean(t_loss)
+            loss = target_loss + predloss
+            self.log('target_loss', target_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+            self.log('pred_loss', torch.mean(loss_logit), on_step=True, on_epoch=True, prog_bar=True, logger=True)
+            self.log('loss of pred_loss', predloss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        elif self.coreset == 'random':
+            num = int(len(list(batch.keys())[0]) * 0.5)
+            idx = np.arange(len(list(batch.keys())[0]))
+            random.shuffle(idx)
+            arg = idx[:num]
+
+            new_batch = {}
+            for key in batch.keys():
+                new_batch[key] = [batch[key][i] for i in arg]
+                if key != 'date':
+                    new_batch[key] = torch.stack(new_batch[key])
+            loss = self._step(new_batch)
+        else:
+            loss = self._step(batch)
+            self.log("loss", loss)
         return loss
 
     def on_train_epoch_start(self):
@@ -277,16 +389,37 @@ class T5(pl.LightningModule):
         else:
             model = self.model
             no_decay = ["bias", "LayerNorm.weight"]
-            optimizer_grouped_parameters = [
-                {
-                    "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
-                    "weight_decay": self.hparams.weight_decay,
-                },
-                {
-                    "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
-                    "weight_decay": 0.0,
-                },
-            ]
+            if self.coreset == 'model':
+                lossnet = self.lossnet
+                optimizer_grouped_parameters = [
+                    {
+                        "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
+                        "weight_decay": self.hparams.weight_decay,
+                    },
+                    {
+                        "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
+                        "weight_decay": 0.0,
+                    },
+                    {
+                        "params": [p for n, p in lossnet.named_parameters() if not any(nd in n for nd in no_decay)],
+                        "weight_decay": 5e-4,
+                    },
+                    {
+                        "params": [p for n, p in lossnet.named_parameters() if any(nd in n for nd in no_decay)],
+                        "weight_decay": 0.0,
+                    },
+                ]
+            else:
+                optimizer_grouped_parameters = [
+                    {
+                        "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
+                        "weight_decay": self.hparams.weight_decay,
+                    },
+                    {
+                        "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
+                        "weight_decay": 0.0,
+                    },
+                ]
 
             optimizer = Adafactor(optimizer_grouped_parameters,
                                   lr=self.hparams.learning_rate, scale_parameter=False, relative_step=False)
