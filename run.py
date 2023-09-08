@@ -38,6 +38,8 @@ if __name__ == '__main__':
         dataset_version=hparam.dataset_version,
         model_name_or_path=hparam.model,
         method=hparam.method,
+        coreset=hparam.coreset,
+        coreset_ratio=hparam.coreset_ratio,
         freeze_level=hparam.__dict__.get('freeze_level'),
         max_input_length=hparam.input_length,
         max_output_length=hparam.output_length,
@@ -53,6 +55,7 @@ if __name__ == '__main__':
         gradient_accumulation_steps=hparam.__dict__.get(
             'gradient_accumulation_steps'),
         n_gpu=hparam.ngpu,
+        repeat_num=hparam.repeat_num,
         num_workers=4 * hparam.ngpu,
         use_lr_scheduling=hparam.__dict__.get('use_lr_scheduling'),
         val_check_interval=1.0,
@@ -65,7 +68,10 @@ if __name__ == '__main__':
     )
 
     args = argparse.Namespace(**args_dict)
-    Model = load_model('T5')
+    if 't5' in args.model_name_or_path:
+        Model = load_model('T5')
+    else:
+        Model = load_model('GPT2')
 
     set_seed(42)
     train(args, Model)
