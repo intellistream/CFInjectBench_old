@@ -118,7 +118,7 @@ def train(args, Model):
                 print('='*50)
                 print('Training -', last_entry)
                 print(f"Repeating number: {repeat_num}")
-                print(f"Coreset ratio: {args.coreset_ratio}")
+                # print(f"Coreset ratio: {args.coreset_ratio}")
                 start_train = time.time()
             trainer.fit(model)
             trainer.fit_loop.max_epochs += args.num_train_epochs
