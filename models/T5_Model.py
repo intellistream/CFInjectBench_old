@@ -313,6 +313,7 @@ class T5(pl.LightningModule):
 
         return loss
 
+
     def training_step(self, batch, batch_idx):
         if self.coreset == 'model':
             self.model.eval()
@@ -368,6 +369,19 @@ class T5(pl.LightningModule):
             self.log("loss", loss)
 
         return loss
+
+    def get_new_batch(self, batch, indices):
+        new_batch = {}
+        for key in batch.keys():
+            new_batch[key] = [batch[key][i] for i in indices]
+            if key != 'date':
+                new_batch[key] = torch.stack(new_batch[key])
+        return new_batch
+
+    def log_metrics(self, target_loss, loss_logit, predloss):
+        self.log('target_loss', target_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('pred_loss', torch.mean(loss_logit), on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('loss of pred_loss', predloss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
 
     def get_new_batch(self, batch, indices):
         new_batch = {}
