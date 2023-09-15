@@ -14,17 +14,66 @@ from transformers import (
     Adafactor,
     T5Tokenizer,
     T5ForConditionalGeneration,
+    T5EncoderModel
 )
-
+import pdb
 from models.Modular_T5 import T5ForConditionalGeneration as T5_Modular
 from models.Modular_Small_T5 import T5ForConditionalGeneration as T5_Modular_Small
 from models.Kadapter_2_T5 import T5ForConditionalGeneration as T5_Kadapter2
 from models.Kadapter_3_T5 import T5ForConditionalGeneration as T5_Kadapter3
 from models.Lora_T5 import T5ForConditionalGeneration as T5_Lora
 from models.RecAdam import RecAdam
+
+from sklearn.metrics import pairwise_distances
+import numpy as np
 from models.Lossnet import LossNet
 
 from dataset import CKLDataset
+
+import numpy as np
+from sklearn.metrics import pairwise_distances
+
+
+
+class CoresetGreedy:
+    def __init__(self, batch):
+
+        self.all_pts = np.array(batch.detach().cpu().numpy())  # Use 'source_ids' from the batch dictionary
+
+
+        self.dset_size = len(self.all_pts)  # Get the total number of points
+        self.min_distances = np.inf * np.ones(self.dset_size)  # Initialize minimum distances to infinity
+        self.already_selected = set()  # Initialize an empty set to keep track of selected points
+
+
+    def update_distances(self, new_indices):
+        # Calculate distances between new indices and all points and update the minimum distances accordingly
+        dists = pairwise_distances(self.all_pts[new_indices], self.all_pts, metric='euclidean')
+        self.min_distances = np.minimum(self.min_distances, np.min(dists, axis=0))
+
+    def sample(self, sample_ratio):
+        # Calculate sample size based on the input ratio
+        sample_size = int(self.dset_size * sample_ratio)
+        new_indices = []
+        for _ in range(sample_size):
+            if not self.already_selected:
+                # If no points have been selected, choose one at random
+                new_idx = np.random.choice(self.dset_size)
+            else:
+                # Otherwise, select the point that maximizes the minimum distance to already selected points
+                # If the point has already been selected, it sets its minimum distance to zero and finds the next point with the maximum minimum distance
+                new_idx = np.argmax(self.min_distances)
+                while new_idx in self.already_selected:
+                    self.min_distances[new_idx] = 0
+                    new_idx = np.argmax(self.min_distances)
+
+            self.already_selected.add(new_idx)  # Add the new index to the set of selected points
+            self.update_distances([new_idx])  # Update the minimum distances with the new index
+            new_indices.append(new_idx)  # Add the new index to the list of new indices
+
+        return new_indices  # Return the list of new indices
+
+
 
 
 class T5(pl.LightningModule):
@@ -37,7 +86,8 @@ class T5(pl.LightningModule):
         self.mem_ratio = 0.1
         self.epoch = 0
         self.coreset = hparams.coreset
-
+        self.coreset_ratio = hparams.coreset_ratio
+        self.repeat_num = hparams.repeat_num
         model_mapping = {
             'modular': T5_Modular,
             'modular_small': T5_Modular_Small,
@@ -177,7 +227,6 @@ class T5(pl.LightningModule):
         if self.coreset == 'model':
             lm_labels = batch["target_ids"]
             lm_labels[lm_labels[:, :] == self.tokenizer.pad_token_id] = -100
-
             target_loss = []
             data_hidden_states = []
             for idx in range(len(batch[list(batch.keys())[0]])):
@@ -274,60 +323,143 @@ class T5(pl.LightningModule):
         return loss
 
     def training_step(self, batch, batch_idx):
-        if self.coreset == 'model':
-            self.model.eval()
-            self.lossnet.eval()
-            uncertainty = torch.tensor([]).cuda()
-            num = int(len(batch[ list(batch.keys())[0]]) * self.coreset_ratio)
-            uncertainty = torch.tensor([]).cuda()
-            with torch.no_grad():
-                lm_labels = batch["target_ids"]
-                lm_labels[lm_labels[:, :] == self.tokenizer.pad_token_id] = -100
-                outputs = self(
-                    input_ids=batch["source_ids"],
-                    attention_mask=batch["source_mask"],
-                    lm_labels=lm_labels,
-                    decoder_attention_mask=batch['target_mask']
-                )
-                pred_loss = self.lossnet(outputs.encoder_hidden_states)  # pred_loss = criterion(scores, labels) # ground truth loss
-                pred_loss = pred_loss.view(pred_loss.size(0))
+        for n in range(self.repeat_num):
+            if self.coreset == 'model':
+                self.model.eval()
+                self.lossnet.eval()
+                uncertainty = torch.tensor([]).cuda()
+                num = int(len(batch[list(batch.keys())[0]]) * self.coreset_ratio)
+                uncertainty = torch.tensor([]).cuda()
+                with torch.no_grad():
+                    lm_labels = batch["target_ids"]
+                    lm_labels[lm_labels[:, :] == self.tokenizer.pad_token_id] = -100
+                    outputs = self(
+                        input_ids=batch["source_ids"],
+                        attention_mask=batch["source_mask"],
+                        lm_labels=lm_labels,
+                        decoder_attention_mask=batch['target_mask']
+                    )
+                    pred_loss = self.lossnet(
+                        outputs.encoder_hidden_states)  # pred_loss = criterion(scores, labels) # ground truth loss
+                    pred_loss = pred_loss.view(pred_loss.size(0))
 
-                uncertainty = torch.cat((uncertainty, pred_loss), 0)
-            # Index in ascending order
-            arg = np.argsort(uncertainty.cpu())[-num:]  # return the index starting from the smallest
-            new_batch = {}
-            for key in batch.keys():
-                new_batch[key] = [batch[key][i] for i in arg]
-                if key != 'date':
-                    new_batch[key] = torch.stack(new_batch[key])
-            self.model.train()
-            self.lossnet.train()
+                    uncertainty = torch.cat((uncertainty, pred_loss), 0)
+                # Index in ascending order
+                arg = np.argsort(uncertainty.cpu())[-num:]  # return the index starting from the smallest
+                new_batch = {}
+                for key in batch.keys():
+                    new_batch[key] = [batch[key][i] for i in arg]
+                    if key != 'date':
+                        new_batch[key] = torch.stack(new_batch[key])
+                self.model.train()
+                self.lossnet.train()
 
-            t_loss, hidden_states = self._step(new_batch)
-            loss_logit = self.lossnet(hidden_states)
-            loss_logit = loss_logit.view(loss_logit.size(0))
-            predloss = self.losspredloss(loss_logit, t_loss)
-            target_loss = torch.mean(t_loss)
-            loss = target_loss + predloss
-            self.log('target_loss', target_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-            self.log('pred_loss', torch.mean(loss_logit), on_step=True, on_epoch=True, prog_bar=True, logger=True)
-            self.log('loss of pred_loss', predloss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        elif self.coreset == 'random':
-            num = int(len(list(batch.keys())[0]) * self.coreset_ratio)
-            idx = np.arange(len(list(batch.keys())[0]))
-            random.shuffle(idx)
-            arg = idx[:num]
+                t_loss, hidden_states = self._step(new_batch)
+                loss_logit = self.lossnet(hidden_states)
+                loss_logit = loss_logit.view(loss_logit.size(0))
+                predloss = self.losspredloss(loss_logit, t_loss)
+                target_loss = torch.mean(t_loss)
+                loss = target_loss + predloss
+                self.log('target_loss', target_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+                self.log('pred_loss', torch.mean(loss_logit), on_step=True, on_epoch=True, prog_bar=True, logger=True)
+                self.log('loss of pred_loss', predloss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
 
-            new_batch = {}
-            for key in batch.keys():
-                new_batch[key] = [batch[key][i] for i in arg]
-                if key != 'date':
-                    new_batch[key] = torch.stack(new_batch[key])
-            loss = self._step(new_batch)
-        else:
-            loss = self._step(batch)
-            self.log("loss", loss)
+            elif self.coreset == 'random':
+                num = int(len(list(batch.keys())[0]) * self.coreset_ratio)
+                idx = np.arange(len(list(batch.keys())[0]))
+                random.shuffle(idx)
+                arg = idx[:num]
+                new_batch = {}
+                for key in batch.keys():
+                    new_batch[key] = [batch[key][i] for i in arg]
+                    if key != 'date':
+                        new_batch[key] = torch.stack(new_batch[key])
+                loss = self._step(new_batch)
+            elif self.coreset == 'K-center':
+                embedding = self.model.get_input_embeddings()
+                emb = embedding(batch['source_ids'].cuda()).mean(dim=1)
+                coreset_greedy = CoresetGreedy(emb)
+                selected_indices = coreset_greedy.sample(self.coreset_ratio)
+                new_batch = {}
+                for key in batch.keys():
+                    new_batch[key] = [batch[key][i] for i in selected_indices]
+                    if key != 'date':
+                        new_batch[key] = torch.stack(new_batch[key])
+
+                loss = self._step(new_batch)
+
+
+            else:
+                loss = self._step(batch)
+                self.log("loss", loss)
         return loss
+
+    # def training_step(self, batch, batch_idx):
+    #     if self.coreset == 'model':
+    #         self.model.eval()
+    #         self.lossnet.eval()
+    #         uncertainty = torch.tensor([]).cuda()
+    #         num = int(len(batch[list(batch.keys())[0]]) * self.coreset_ratio)
+    #
+    #         with torch.no_grad():
+    #             lm_labels = batch["target_ids"]
+    #             lm_labels[lm_labels[:, :] == self.tokenizer.pad_token_id] = -100
+    #             outputs = self(
+    #                 input_ids=batch["source_ids"],
+    #                 attention_mask=batch["source_mask"],
+    #                 lm_labels=lm_labels,
+    #                 decoder_attention_mask=batch['target_mask']
+    #             )
+    #             pred_loss = self.lossnet(outputs.encoder_hidden_states)
+    #             pred_loss = pred_loss.view(pred_loss.size(0))
+    #             uncertainty = torch.cat((uncertainty, pred_loss), 0)
+    #
+    #         arg = np.argsort(uncertainty.cpu())[-num:]
+    #         new_batch = self.get_new_batch(batch, arg)
+    #
+    #         self.model.train()
+    #         self.lossnet.train()
+    #
+    #         t_loss, hidden_states = self._step(new_batch)
+    #         loss_logit = self.lossnet(hidden_states).view(loss_logit.size(0))
+    #         predloss = self.losspredloss(loss_logit, t_loss)
+    #         target_loss = torch.mean(t_loss)
+    #         loss = target_loss + predloss
+    #         self.log_metrics(target_loss, loss_logit, predloss)
+    #
+    #     elif self.coreset == 'random':
+    #         num = int(len(list(batch.keys())[0]) * 0.5)
+    #         idx = np.arange(len(list(batch.keys())[0]))
+    #         random.shuffle(idx)
+    #         arg = idx[:num]
+    #         new_batch = self.get_new_batch(batch, arg)
+    #         loss = self._step(new_batch)
+    #
+    #     elif self.coreset == 'camel_coreset':
+    #         num = int(len(list(batch.keys())[0]) * 0.5)
+    #         idx = np.arange(len(list(batch.keys())[0]))
+    #         selected_indices = self.coreset_greedy.sample(sample_ratio)
+    #         new_batch = self.get_new_batch(batch, selected_indices)
+    #         loss = self._step(new_batch)
+    #
+    #     else:
+    #         loss = self._step(batch)
+    #         self.log("loss", loss)
+    #
+    #     return loss
+    #
+    # def get_new_batch(self, batch, indices):
+    #     new_batch = {}
+    #     for key in batch.keys():
+    #         new_batch[key] = [batch[key][i] for i in indices]
+    #         if key != 'date':
+    #             new_batch[key] = torch.stack(new_batch[key])
+    #     return new_batch
+    #
+    # def log_metrics(self, target_loss, loss_logit, predloss):
+    #     self.log('target_loss', target_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+    #     self.log('pred_loss', torch.mean(loss_logit), on_step=True, on_epoch=True, prog_bar=True, logger=True)
+    #     self.log('loss of pred_loss', predloss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
 
     def on_train_epoch_start(self):
         self.epoch += 1

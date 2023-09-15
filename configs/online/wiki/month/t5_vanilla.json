@@ -16,9 +16,9 @@
     "use_deepspeed": false,
     "use_lr_scheduling": false,
     "check_validation": false,
-    "repeat_num": 1,
+    "repeat_num": 8,
     "checkpoint_path": "outputs/wiki/month/T5_base_baseline_test_redundancy",
     "output_log": "log/wiki/month/baseline_redundancy/",
-    "coreset": "none",
-    "coreset_ratio" : 0.1
+    "coreset": "K-center",
+    "coreset_ratio" : 0.5
 }

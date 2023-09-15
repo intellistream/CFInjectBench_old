@@ -112,13 +112,12 @@ def train(args, Model):
     for idx, row in train_stream_df.iterrows():
         if last_entry and last_entry != row['date'] or idx == len(train_stream_df) - 1:
             repeat_num = args.repeat_num
-            collector = repeat_num * collector
             model.set_dataset(CKLDataset(collector, 'train', tokenizer, args))
             if trainer.global_rank == 0:
                 print('='*50)
                 print('Training -', last_entry)
                 print(f"Repeating number: {repeat_num}")
-                # print(f"Coreset ratio: {args.coreset_ratio}")
+                print(f"Coreset ratio: {args.coreset_ratio}")
                 start_train = time.time()
             trainer.fit(model)
             trainer.fit_loop.max_epochs += args.num_train_epochs
