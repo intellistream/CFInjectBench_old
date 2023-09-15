@@ -37,6 +37,7 @@ class T5(pl.LightningModule):
         self.mem_ratio = 0.1
         self.epoch = 0
         self.coreset = hparams.coreset
+        self.coreset_ratio = hparams.coreset_ratio
 
         model_mapping = {
             'modular': T5_Modular,
@@ -72,7 +73,6 @@ class T5(pl.LightningModule):
             self.freeze_params(self.model)
 
         if hparams.coreset == "model":
-            self.coreset_ratio = hparams.coreset_ratio
             self.lossnet = LossNet(depth=self.model.config.num_layers, input_dim=self.model.config.hidden_size)
 
         if hparams.method == 'modular_small':
@@ -278,7 +278,7 @@ class T5(pl.LightningModule):
             self.model.eval()
             self.lossnet.eval()
             uncertainty = torch.tensor([]).cuda()
-            num = int(len(batch[ list(batch.keys())[0]]) * self.coreset_ratio)
+            num = int(len(batch[list(batch.keys())[0]]) * self.coreset_ratio)
             uncertainty = torch.tensor([]).cuda()
             with torch.no_grad():
                 lm_labels = batch["target_ids"]
@@ -313,7 +313,7 @@ class T5(pl.LightningModule):
             self.log('pred_loss', torch.mean(loss_logit), on_step=True, on_epoch=True, prog_bar=True, logger=True)
             self.log('loss of pred_loss', predloss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         elif self.coreset == 'random':
-            num = int(len(list(batch.keys())[0]) * self.coreset_ratio)
+            num = int(len(batch[list(batch.keys())[0]]) * self.coreset_ratio)
             idx = np.arange(len(list(batch.keys())[0]))
             random.shuffle(idx)
             arg = idx[:num]
