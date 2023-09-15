@@ -32,8 +32,7 @@ from dataset import CKLDataset
 
 import numpy as np
 from sklearn.metrics import pairwise_distances
-
-
+import torch
 
 class CoresetGreedy:
     def __init__(self, batch):
@@ -322,6 +321,8 @@ class T5(pl.LightningModule):
 
         return loss
 
+
+
     def training_step(self, batch, batch_idx):
         for n in range(self.repeat_num):
             if self.coreset == 'model':
@@ -342,7 +343,6 @@ class T5(pl.LightningModule):
                     pred_loss = self.lossnet(
                         outputs.encoder_hidden_states)  # pred_loss = criterion(scores, labels) # ground truth loss
                     pred_loss = pred_loss.view(pred_loss.size(0))
-
                     uncertainty = torch.cat((uncertainty, pred_loss), 0)
                 # Index in ascending order
                 arg = np.argsort(uncertainty.cpu())[-num:]  # return the index starting from the smallest
@@ -353,7 +353,6 @@ class T5(pl.LightningModule):
                         new_batch[key] = torch.stack(new_batch[key])
                 self.model.train()
                 self.lossnet.train()
-
                 t_loss, hidden_states = self._step(new_batch)
                 loss_logit = self.lossnet(hidden_states)
                 loss_logit = loss_logit.view(loss_logit.size(0))
@@ -365,7 +364,7 @@ class T5(pl.LightningModule):
                 self.log('loss of pred_loss', predloss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
 
             elif self.coreset == 'random':
-                num = int(len(list(batch.keys())[0]) * self.coreset_ratio)
+                num = int(len(batch[list(batch.keys())[0]]) * self.coreset_ratio)
                 idx = np.arange(len(list(batch.keys())[0]))
                 random.shuffle(idx)
                 arg = idx[:num]
@@ -375,6 +374,7 @@ class T5(pl.LightningModule):
                     if key != 'date':
                         new_batch[key] = torch.stack(new_batch[key])
                 loss = self._step(new_batch)
+
             elif self.coreset == 'K-center':
                 embedding = self.model.get_input_embeddings()
                 emb = embedding(batch['source_ids'].cuda()).mean(dim=1)
@@ -385,14 +385,22 @@ class T5(pl.LightningModule):
                     new_batch[key] = [batch[key][i] for i in selected_indices]
                     if key != 'date':
                         new_batch[key] = torch.stack(new_batch[key])
-
                 loss = self._step(new_batch)
-
 
             else:
                 loss = self._step(batch)
                 self.log("loss", loss)
+
+            if n != self.repeat_num-1:
+                # clear gradients
+                self.optimizers().zero_grad()
+                # backward
+                loss.backward()
+                # update parameters
+                self.optimizers().step()
         return loss
+
+
 
     # def training_step(self, batch, batch_idx):
     #     if self.coreset == 'model':
@@ -400,7 +408,7 @@ class T5(pl.LightningModule):
     #         self.lossnet.eval()
     #         uncertainty = torch.tensor([]).cuda()
     #         num = int(len(batch[list(batch.keys())[0]]) * self.coreset_ratio)
-    #
+    #         uncertainty = torch.tensor([]).cuda()
     #         with torch.no_grad():
     #             lm_labels = batch["target_ids"]
     #             lm_labels[lm_labels[:, :] == self.tokenizer.pad_token_id] = -100
@@ -410,56 +418,61 @@ class T5(pl.LightningModule):
     #                 lm_labels=lm_labels,
     #                 decoder_attention_mask=batch['target_mask']
     #             )
-    #             pred_loss = self.lossnet(outputs.encoder_hidden_states)
+    #             pred_loss = self.lossnet(
+    #                 outputs.encoder_hidden_states)  # pred_loss = criterion(scores, labels) # ground truth loss
     #             pred_loss = pred_loss.view(pred_loss.size(0))
+    #
     #             uncertainty = torch.cat((uncertainty, pred_loss), 0)
-    #
-    #         arg = np.argsort(uncertainty.cpu())[-num:]
-    #         new_batch = self.get_new_batch(batch, arg)
-    #
+    #         # Index in ascending order
+    #         arg = np.argsort(uncertainty.cpu())[-num:]  # return the index starting from the smallest
+    #         new_batch = {}
+    #         for key in batch.keys():
+    #             new_batch[key] = [batch[key][i] for i in arg]
+    #             if key != 'date':
+    #                 new_batch[key] = torch.stack(new_batch[key])
     #         self.model.train()
     #         self.lossnet.train()
     #
     #         t_loss, hidden_states = self._step(new_batch)
-    #         loss_logit = self.lossnet(hidden_states).view(loss_logit.size(0))
+    #         loss_logit = self.lossnet(hidden_states)
+    #         loss_logit = loss_logit.view(loss_logit.size(0))
     #         predloss = self.losspredloss(loss_logit, t_loss)
     #         target_loss = torch.mean(t_loss)
     #         loss = target_loss + predloss
-    #         self.log_metrics(target_loss, loss_logit, predloss)
+    #         self.log('target_loss', target_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+    #         self.log('pred_loss', torch.mean(loss_logit), on_step=True, on_epoch=True, prog_bar=True, logger=True)
+    #         self.log('loss of pred_loss', predloss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
     #
     #     elif self.coreset == 'random':
-    #         num = int(len(list(batch.keys())[0]) * 0.5)
+    #         num = int(len(list(batch.keys())[0]) * self.coreset_ratio)
     #         idx = np.arange(len(list(batch.keys())[0]))
     #         random.shuffle(idx)
     #         arg = idx[:num]
-    #         new_batch = self.get_new_batch(batch, arg)
+    #         new_batch = {}
+    #         for key in batch.keys():
+    #             new_batch[key] = [batch[key][i] for i in arg]
+    #             if key != 'date':
+    #                 new_batch[key] = torch.stack(new_batch[key])
+    #
+    #         loss = self._step(new_batch)
+    #     elif self.coreset == 'K-center':
+    #         embedding = self.model.get_input_embeddings()
+    #         emb = embedding(batch['source_ids'].cuda()).mean(dim=1)
+    #         coreset_greedy = CoresetGreedy(emb)
+    #         selected_indices = coreset_greedy.sample(self.coreset_ratio)
+    #         new_batch = {}
+    #         for key in batch.keys():
+    #             new_batch[key] = [batch[key][i] for i in selected_indices]
+    #             if key != 'date':
+    #                 new_batch[key] = torch.stack(new_batch[key])
+    #
     #         loss = self._step(new_batch)
     #
-    #     elif self.coreset == 'camel_coreset':
-    #         num = int(len(list(batch.keys())[0]) * 0.5)
-    #         idx = np.arange(len(list(batch.keys())[0]))
-    #         selected_indices = self.coreset_greedy.sample(sample_ratio)
-    #         new_batch = self.get_new_batch(batch, selected_indices)
-    #         loss = self._step(new_batch)
     #
     #     else:
     #         loss = self._step(batch)
     #         self.log("loss", loss)
-    #
     #     return loss
-    #
-    # def get_new_batch(self, batch, indices):
-    #     new_batch = {}
-    #     for key in batch.keys():
-    #         new_batch[key] = [batch[key][i] for i in indices]
-    #         if key != 'date':
-    #             new_batch[key] = torch.stack(new_batch[key])
-    #     return new_batch
-    #
-    # def log_metrics(self, target_loss, loss_logit, predloss):
-    #     self.log('target_loss', target_loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-    #     self.log('pred_loss', torch.mean(loss_logit), on_step=True, on_epoch=True, prog_bar=True, logger=True)
-    #     self.log('loss of pred_loss', predloss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
 
     def on_train_epoch_start(self):
         self.epoch += 1
