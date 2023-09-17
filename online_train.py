@@ -7,6 +7,8 @@ import time
 import pytorch_lightning as pl
 
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
+
+
 from transformers import T5Tokenizer
 from collections import deque
 
@@ -90,6 +92,7 @@ def train(args, Model):
         val_check_interval=args.val_check_interval,
         callbacks=[CustomModelCheckpoint(dirpath=args.output_dir)],
         strategy='ddp'
+
     )
 
     last_entry = None 
@@ -108,6 +111,7 @@ def train(args, Model):
     writefile = open(f'{args.output_log}results.csv', 'w', newline='', encoding='utf-8')
     writer = csv.writer(writefile)
     writer.writerow(["Date", "EM", "BWT", "FWT", "DTW", "Forget", "Update", "Time"])
+    writefile.flush()
 
     for idx, row in train_stream_df.iterrows():
         if last_entry and last_entry != row['date'] or idx == len(train_stream_df) - 1:
@@ -178,14 +182,21 @@ def train(args, Model):
                 # writer.writerow(["Date", "EM", "BWT", "FWT", "DTW", "Forget", "Update", "Time"])
                 if first_time:
                     writer.writerow([periods[0], acc[-1], None, None, dtw[-1], None, None, train_time])
+                    writefile.flush()
                     first_time = False
                 else:
                     writer.writerow([periods[1], acc[-1], bwt[-1], fwt[-1], dtw[-1], forget, update, train_time])
+                    writefile.flush()
 
             trainer.strategy.barrier()
 
         collector.append(row.to_dict())
         last_entry = row['date']
+
+
+
+    trainer.strategy.barrier()
+
 
     # if trainer.global_rank == 0:
     #     total_time = time.time() - start_time
@@ -199,7 +210,3 @@ def train(args, Model):
     #         writer = csv.writer(writefile)
     #         writer.writerow(['ACC', 'BWT', 'DTW', 'TIME', 'TRAIN_TIME'])
     #         writer.writerow([sum(acc)/len(acc), sum(bwt)/len(bwt), sum(dtw)/len(dtw), total_time, total_time-sum(eval_time)])
-
-    trainer.strategy.barrier()
-
-
