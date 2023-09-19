@@ -5,3 +5,5 @@ numpy
 sentencepiece==0.1.94
 spacy
 deepspeed
+fastdtw
+scikit-learn
