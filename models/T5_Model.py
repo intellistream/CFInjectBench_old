@@ -50,11 +50,12 @@ class CoresetGreedy:
         dists = pairwise_distances(self.all_pts[new_indices], self.all_pts, metric='euclidean')
         self.min_distances = np.minimum(self.min_distances, np.min(dists, axis=0))
 
+    
     def sample(self, sample_ratio):
         # Calculate sample size based on the input ratio
         sample_size = int(self.dset_size * sample_ratio)
         new_indices = []
-        for _ in range(sample_size):
+        for idx in range(sample_size):
             if not self.already_selected:
                 # If no points have been selected, choose one at random
                 new_idx = np.random.choice(self.dset_size)
@@ -63,8 +64,15 @@ class CoresetGreedy:
                 # If the point has already been selected, it sets its minimum distance to zero and finds the next point with the maximum minimum distance
                 new_idx = np.argmax(self.min_distances)
                 while new_idx in self.already_selected:
+                    print(self.min_distances)
                     self.min_distances[new_idx] = 0
                     new_idx = np.argmax(self.min_distances)
+                    if np.all(self.min_distances == 0):
+                        break
+
+            if np.all(self.min_distances == 0):
+                # No available points left to select
+                break
 
             self.already_selected.add(new_idx)  # Add the new index to the set of selected points
             self.update_distances([new_idx])  # Update the minimum distances with the new index
