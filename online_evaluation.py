@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 from fastdtw import fastdtw
 from tqdm import tqdm
 import random
+import pandas as pd
 import numpy as np
 from scipy.spatial.distance import euclidean
 
@@ -20,6 +21,12 @@ def evaluate(args, model, df, tokenizer, rank):
     model.eval()
 
     stream_datasets = df.groupby('date')
+    def custom_sort(group):
+        group['s_date'] = pd.to_datetime(group['date'])
+        return group
+    stream_datasets = stream_datasets.apply(custom_sort).reset_index(drop=True)
+    stream_datasets = stream_datasets.groupby('s_date')
+
     metrics = []
 
     final_m_k = []
@@ -60,15 +67,26 @@ def evaluate(args, model, df, tokenizer, rank):
                                     args), batch_size=args.eval_batch_size, shuffle=False)
 
                 for batch in iter(loader):
-                    outs = model.model.generate(
-                        batch["source_ids"].cuda(),
-                        attention_mask=batch["source_mask"].cuda(),
-                        use_cache=True,
-                        decoder_attention_mask=batch['target_mask'].cuda(),
-                        max_length=args.max_output_length,
-                        num_beams=2,
-                        early_stopping=True,
-                    )
+                    if 't5' in args.model_name_or_path:
+                        outs = model.model.generate(
+                            batch["source_ids"].cuda(),
+                            attention_mask=batch["source_mask"].cuda(),
+                            use_cache=True,
+                            decoder_attention_mask=batch['target_mask'].cuda(),
+                            max_length=args.max_output_length,
+                            num_beams=2,
+                            early_stopping=True,
+                        )
+                    else:
+                        outs = model.model.generate(
+                            batch["source_ids"].cuda(),
+                            attention_mask=batch["source_mask"].cuda(),
+                            pad_token_id=50256,
+                            use_cache=True,
+                            max_length=args.max_output_length+1,
+                            num_beams=2,
+                            early_stopping=True,
+                        )
 
                     dec = model.ids_to_clean_text(outs)
                     targets = model.ids_to_clean_text(batch['target_ids'])
@@ -93,18 +111,29 @@ def evaluate(args, model, df, tokenizer, rank):
                     lm_labels[lm_labels[:, :] == -100] = 0
 
                     with torch.no_grad():
-                        outputs = model.model(
-                            input_ids=batch['source_ids'].cuda(),
-                            attention_mask=batch['source_mask'].cuda(),
-                            labels=batch['target_ids'].cuda(),
-                            decoder_attention_mask=batch['target_mask'].cuda(),
-                            output_hidden_states=True
-                        )
-
+                        if 't5' in args.model_name_or_path:
+                            outputs = model.model(
+                                input_ids=batch['source_ids'].cuda(),
+                                attention_mask=batch['source_mask'].cuda(),
+                                labels=batch['target_ids'].cuda(),
+                                decoder_attention_mask=batch['target_mask'].cuda(),
+                                output_hidden_states=True
+                            )
+                            p_emb = outputs.encoder_last_hidden_state
+                        else:
+                            outputs = model.model(
+                                input_ids=batch['source_ids'].cuda(),
+                                attention_mask=batch['source_mask'].cuda(),
+                                labels=batch['target_ids'].cuda(),
+                                output_hidden_states=True
+                            )
+                            p_emb = outputs.hidden_states[-1]
                         g_emb = embedding_layer(lm_labels.cuda())
 
-                    p_emb = outputs.encoder_last_hidden_state
 
+
+                    # [B, N, L] --> [B, 1, 1] --> [B]
+                    # print(torch.mean(p_emb, dim=[1, 2]).cpu().numpy())
                     m_k.extend(torch.mean(
                         p_emb, dim=[1, 2]).cpu().numpy())
                     w_k.extend(torch.mean(
@@ -116,13 +145,14 @@ def evaluate(args, model, df, tokenizer, rank):
         world_knowledge.append(w_k)
 
         # for calculate the final DTW
-        final_m_k.extend(m_k)
-        final_w_k.extend(w_k)
+        final_m_k.extend(m_k) # 2019-1, 2019-2
+        final_w_k.extend(w_k) # 2019-1, 2019-2
 
         metrics.append(100 * em_correct_num / total_cnt)
-    dtw, _ = fastdtw(np.array(final_m_k).reshape(len(final_m_k), 1),
-                     np.array(final_w_k).reshape(len(final_w_k), 1),
-                     dist=euclidean)
+    dtw = np.linalg.norm(np.array(final_m_k) - np.array(final_w_k))
+    # dtw, _ = fastdtw(np.array(final_m_k).reshape(len(final_m_k), 1),
+    #                  np.array(final_w_k).reshape(len(final_w_k), 1),
+    #                  dist=euclidean)
     knowledge = {"model":model_knowledge, "world":world_knowledge}
     model.train()
 
