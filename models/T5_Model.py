@@ -23,7 +23,7 @@ from models.Kadapter_2_T5 import T5ForConditionalGeneration as T5_Kadapter2
 from models.Kadapter_3_T5 import T5ForConditionalGeneration as T5_Kadapter3
 from models.Lora_T5 import T5ForConditionalGeneration as T5_Lora
 from models.RecAdam import RecAdam
-
+from models.KnowledgeDistilliation_T5 import StudentModel
 from sklearn.metrics import pairwise_distances
 import numpy as np
 from models.Lossnet import LossNet
@@ -38,8 +38,6 @@ class CoresetGreedy:
     def __init__(self, batch):
 
         self.all_pts = np.array(batch.detach().cpu().numpy())  # Use 'source_ids' from the batch dictionary
-
-
         self.dset_size = len(self.all_pts)  # Get the total number of points
         self.min_distances = np.inf * np.ones(self.dset_size)  # Initialize minimum distances to infinity
         self.already_selected = set()  # Initialize an empty set to keep track of selected points
@@ -54,7 +52,7 @@ class CoresetGreedy:
         # Calculate sample size based on the input ratio
         sample_size = int(self.dset_size * sample_ratio)
         new_indices = []
-        for _ in range(sample_size):
+        for idx in range(sample_size):
             if not self.already_selected:
                 # If no points have been selected, choose one at random
                 new_idx = np.random.choice(self.dset_size)
@@ -63,16 +61,21 @@ class CoresetGreedy:
                 # If the point has already been selected, it sets its minimum distance to zero and finds the next point with the maximum minimum distance
                 new_idx = np.argmax(self.min_distances)
                 while new_idx in self.already_selected:
+                    print(self.min_distances)
                     self.min_distances[new_idx] = 0
                     new_idx = np.argmax(self.min_distances)
+                    if np.all(self.min_distances == 0):
+                        break
+
+            if np.all(self.min_distances == 0):
+                # No available points left to select
+                break
 
             self.already_selected.add(new_idx)  # Add the new index to the set of selected points
             self.update_distances([new_idx])  # Update the minimum distances with the new index
             new_indices.append(new_idx)  # Add the new index to the list of new indices
 
         return new_indices  # Return the list of new indices
-
-
 
 
 class T5(pl.LightningModule):
@@ -87,6 +90,7 @@ class T5(pl.LightningModule):
         self.coreset = hparams.coreset
         self.coreset_ratio = hparams.coreset_ratio
         self.repeat_num = hparams.repeat_num
+        self.teacher_model = None
         model_mapping = {
             'modular': T5_Modular,
             'modular_small': T5_Modular_Small,
@@ -94,12 +98,13 @@ class T5(pl.LightningModule):
             'kadapter3': T5_Kadapter3,
             'lora': T5_Lora,
             'recadam': T5ForConditionalGeneration,
+            'kd': T5ForConditionalGeneration
         }
 
         if hparams.method in model_mapping:
             if hparams.method == 'recadam':
                 self.pretrained_model = model_mapping[hparams.method].from_pretrained(
-                    hparams.model_name_or_path)
+                    hparams.model_name_or_path, output_hidden_states=True)
                 self.freeze_params(self.pretrained_model)
 
             self.model = model_mapping[hparams.method].from_pretrained(
@@ -135,14 +140,16 @@ class T5(pl.LightningModule):
 
         self.output_dir = self.hparams.output_dir
 
-    def set_dataset(self, dataset):
+
+    def set_dataset(self, dataset, kd=False):
         self.dataset = dataset
-        if self.hparams.method == 'mixreview':
+        if kd or self.hparams.method == 'mixreview':
             self.dataset = self.set_memory_buffer()
 
-        # train_size = int(0.8 * len(self.dataset))
-        # val_size = len(self.dataset) - train_size
         self.train_set, self.val_set = random_split(self.dataset, [0.8, 0.2])
+
+
+
 
     def set_memory_buffer(self):
         time_inv_relations = ['P19', 'P20', 'P279', 'P37', 'P449', 'P47', 'P138', 'P364', 'P527', 'P176', 'P27', 'P407', 'P30',
@@ -464,7 +471,7 @@ class T5(pl.LightningModule):
                     new_batch[key] = torch.stack(new_batch[key])
             loss = self._step(new_batch)
 
-        elif self.coreset == 'k-center':
+        elif self.coreset == 'K-center':
             for n in range(self.repeat_num):
                 if n == 0:
                     embedding = self.model.get_input_embeddings()
@@ -486,8 +493,16 @@ class T5(pl.LightningModule):
                     self.optimizers().step()
 
         else:
-            loss = self._step(batch)
-            self.log("loss", loss)
+            for n in range(self.repeat_num):
+                loss = self._step(batch)
+                self.log("loss", loss)
+                if n != self.repeat_num - 1:
+                    # clear gradients
+                    self.optimizers().zero_grad()
+                    # backward
+                    loss.backward()
+                    # update parameters
+                    self.optimizers().step()
 
         return loss
 
@@ -606,3 +621,27 @@ class T5(pl.LightningModule):
 
     def val_dataloader(self):
         return DataLoader(self.val_set, batch_size=self.hparams.train_batch_size, num_workers=self.hparams.num_workers, shuffle=False)
+
+    def on_train_start(self):
+        if self.teacher_model:
+            self.model = self.teacher_model
+
+    def on_train_end(self):
+        if self.hparams.method == 'kd':
+            if not self.teacher_model:
+                self.teacher_model = self.model
+                return
+
+            self.set_dataset(self.dataset, kd=True)
+
+            student_model = StudentModel(
+                self.model, self.teacher_model, self.tokenizer, self.hparams.temperature, self.hparams.alpha, self.ids_to_clean_text, self.calculate_scores)
+
+            self.teacher_model = self.model
+
+            trainer = pl.Trainer(
+                max_epochs=self.hparams.distil_epoch, accelerator='gpu', strategy='ddp')
+            trainer.fit(student_model, self.train_dataloader(),
+                        self.val_dataloader())
+
+            self.model = student_model.model

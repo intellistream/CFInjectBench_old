@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 from fastdtw import fastdtw
 from tqdm import tqdm
 import random
+import pandas as pd
 import numpy as np
 from scipy.spatial.distance import euclidean
 
@@ -20,6 +21,12 @@ def evaluate(args, model, df, tokenizer, rank):
     model.eval()
 
     stream_datasets = df.groupby('date')
+    def custom_sort(group):
+        group['s_date'] = pd.to_datetime(group['date'])
+        return group
+    stream_datasets = stream_datasets.apply(custom_sort).reset_index(drop=True)
+    stream_datasets = stream_datasets.groupby('s_date')
+
     metrics = []
 
     final_m_k = []
@@ -105,6 +112,8 @@ def evaluate(args, model, df, tokenizer, rank):
 
                     p_emb = outputs.encoder_last_hidden_state
 
+                    # [B, N, L] --> [B, 1, 1] --> [B]
+                    # print(torch.mean(p_emb, dim=[1, 2]).cpu().numpy())
                     m_k.extend(torch.mean(
                         p_emb, dim=[1, 2]).cpu().numpy())
                     w_k.extend(torch.mean(
@@ -116,13 +125,14 @@ def evaluate(args, model, df, tokenizer, rank):
         world_knowledge.append(w_k)
 
         # for calculate the final DTW
-        final_m_k.extend(m_k)
-        final_w_k.extend(w_k)
+        final_m_k.extend(m_k) # 2019-1, 2019-2
+        final_w_k.extend(w_k) # 2019-1, 2019-2
 
         metrics.append(100 * em_correct_num / total_cnt)
-    dtw, _ = fastdtw(np.array(final_m_k).reshape(len(final_m_k), 1),
-                     np.array(final_w_k).reshape(len(final_w_k), 1),
-                     dist=euclidean)
+    dtw = np.linalg.norm(np.array(final_m_k) - np.array(final_w_k))
+    # dtw, _ = fastdtw(np.array(final_m_k).reshape(len(final_m_k), 1),
+    #                  np.array(final_w_k).reshape(len(final_w_k), 1),
+    #                  dist=euclidean)
     knowledge = {"model":model_knowledge, "world":world_knowledge}
     model.train()
 

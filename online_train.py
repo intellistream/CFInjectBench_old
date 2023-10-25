@@ -19,11 +19,13 @@ from fastdtw import fastdtw
 import numpy as np
 from scipy.spatial.distance import euclidean
 import torch
+from copy import deepcopy
 
 def get_dtw(m, w):
-    dtw, _ = fastdtw(np.array(m).reshape(len(m), 1),
-                   np.array(w).reshape(len(w), 1),
-                   dist=euclidean)
+    # dtw, _ = fastdtw(np.array(m).reshape(len(m), 1),
+    #                np.array(w).reshape(len(w), 1),
+    #                dist=euclidean)
+    dtw = np.linalg.norm(np.array(m) - np.array(w))
     return dtw
 
 def find_next_entry(start_idx, train_stream_df):
@@ -41,23 +43,10 @@ class CustomModelCheckpoint(pl.Callback):
         self.pre_date = None
         if not os.path.exists(dirpath):
             os.makedirs(dirpath)
-            # self.trainer.logger.log_metrics(f"Folder '{dirpath}' created successfully.")
-            # print(f"Folder '{dirpath}' already exists.")
         self.save_path = dirpath + "/date={date}.ckpt"
 
     def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
-        # # for batch in iter(trainer.dataloader):
-        # for i in range(len(batch['date'])):
-        #     print(batch['date'][i])
         self.pre_date = batch["date"][0]
-        # # print(date)
-        # if self.pre_date is None:
-        #     self.pre_date = batch["date"][-1]
-        # if self.pre_date != date:
-        #     torch.save(pl_module.state_dict(), self.save_path.format(epoch=trainer.current_epoch, date=self.pre_date))
-        #     if trainer.global_rank == 0:
-        #         print(f"\nSave model in {self.save_path.format(epoch=trainer.current_epoch, date=self.pre_date)}")
-        #     self.pre_date = batch["date"][-1]
 
     def on_train_epoch_end(self, trainer, pl_module):
         torch.save(pl_module.state_dict(), self.save_path.format(date=self.pre_date))
@@ -90,7 +79,7 @@ def train(args, Model):
         devices=args.n_gpu,
         gradient_clip_val=args.max_grad_norm,
         val_check_interval=args.val_check_interval,
-        callbacks=[CustomModelCheckpoint(dirpath=args.output_dir)],
+        # callbacks=[CustomModelCheckpoint(dirpath=args.output_dir)],
         strategy='ddp'
 
     )
@@ -112,19 +101,23 @@ def train(args, Model):
     writer = csv.writer(writefile)
     writer.writerow(["Date", "EM", "BWT", "FWT", "DTW", "Forget", "Update", "Time"])
     writefile.flush()
+    flag = True
 
     for idx, row in train_stream_df.iterrows():
         if last_entry and last_entry != row['date'] or idx == len(train_stream_df) - 1:
             repeat_num = args.repeat_num
-            model.set_dataset(CKLDataset(collector, 'train', tokenizer, args))
+            if args.model_name_or_path != 'initial':
+                model.set_dataset(CKLDataset(collector, 'train', tokenizer, args))
             if trainer.global_rank == 0:
-                print('='*50)
+                print('=' * 50)
                 print('Training -', last_entry)
                 print(f"Repeating number: {repeat_num}")
+                print(f"Coreset method: {args.coreset}")
                 print(f"Coreset ratio: {args.coreset_ratio}")
                 start_train = time.time()
-            trainer.fit(model)
-            trainer.fit_loop.max_epochs += args.num_train_epochs
+            if args.method != 'initial':
+                trainer.fit(model)
+                trainer.fit_loop.max_epochs += args.num_train_epochs
             if trainer.global_rank == 0:
                 train_time = time.time() - start_train
                 print(f'TRAIN TIME:{train_time}')
@@ -141,6 +134,7 @@ def train(args, Model):
                 metrics, dtw_res, k, e_time = evaluate(
                     args, model, test_stream_df[test_stream_df['date'].isin(periods)], tokenizer, trainer.global_rank)
 
+
                 if len(periods) == 3:
                     # metric, knowledge:
                     # 1-1 1-2
@@ -150,51 +144,58 @@ def train(args, Model):
                     if len(knowledge['model']) == 2:
                         forget = get_dtw(k['model'][0], knowledge['model'][0])
                         update = get_dtw(k['model'][1], knowledge['model'][1])
+                        bwt_res = metrics[0] - pre_metric[0]
+                        fwt_res = metrics[1] - pre_metric[1]
 
-                        bwt.append(metrics[0] - pre_metric[0])
-                        fwt.append(metrics[1] - pre_metric[1])
                     if len(knowledge['model']) == 3:
                         forget = get_dtw(k['model'][0], knowledge['model'][1])
                         update = get_dtw(k['model'][1], knowledge['model'][2])
+                        bwt_res = metrics[0] - pre_metric[1]
+                        fwt_res = metrics[1] - pre_metric[2]
 
-                        bwt.append(metrics[0] - pre_metric[1])
-                        fwt.append(metrics[1] - pre_metric[2])
+                    # bwt.append(bwt_res)
+                    # fwt.append(fwt_res)
 
                     print("Forget:", forget)
                     print("Update:", update)
-                    print('BWT:', bwt[-1])
-                    print('FWT:', fwt[-1])
+                    print('BWT:', bwt_res)
+                    print('FWT:', fwt_res)
 
-                dtw.append(dtw_res)
-                knowledge = k
+                # dtw.append(dtw_res)
+                knowledge = deepcopy(k)
                 pre_metric = metrics
                 if len(metrics) == 2:
                     acc_idx = 0
                 else:
                     acc_idx = 1
-                acc.append(metrics[acc_idx]) # TODO
+                # acc.append(metrics[acc_idx])
                 eval_time.append(e_time)
-                print('DTW:', dtw[-1])
-                print('ACC:', acc[-1])
+                print('DTW:', dtw_res)
+                print('ACC:', metrics[acc_idx])
                 print('TIME:', eval_time[-1])
 
                 writer = csv.writer(writefile)
                 # writer.writerow(["Date", "EM", "BWT", "FWT", "DTW", "Forget", "Update", "Time"])
                 if first_time:
-                    writer.writerow([periods[0], acc[-1], None, None, dtw[-1], None, None, train_time])
-                    writefile.flush()
+                    writer.writerow([periods[0], metrics[acc_idx], None, None, dtw_res, None, None, train_time])
                     first_time = False
+                    writefile.flush()
                 else:
-                    writer.writerow([periods[1], acc[-1], bwt[-1], fwt[-1], dtw[-1], forget, update, train_time])
+                    writer.writerow([periods[1], metrics[acc_idx], bwt_res, fwt_res, dtw_res, forget, update, train_time])
+                    # writer.writerow([periods[1], acc[-1], bwt[-1], fwt[-1], dtw[-1], forget, update, train_time])
                     writefile.flush()
 
             trainer.strategy.barrier()
 
+        # # to control the start date
+        # if row['date'] == '2019-8':
+        #     flag = False
+        # if flag:
+        #     continue
         collector.append(row.to_dict())
         last_entry = row['date']
 
-
-
+    writefile.close()
     trainer.strategy.barrier()
 
 

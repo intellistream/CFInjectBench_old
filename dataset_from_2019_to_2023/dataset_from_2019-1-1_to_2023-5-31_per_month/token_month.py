@@ -23,6 +23,6 @@ def count_tokens_in_jsonl(file_path):
     return total_tokens
 
 # 使用函数计算token数
-file_path = '/yuhao/OCKL/dataset_from_2019_to_2023/dataset_from_2019-1-1_to_2023-5-31_per_month/datesorted_train_1.jsonl'
+file_path = '/yuhao/OCKL/dataset_from_2019_to_2023/dataset_from_2019-1-1_to_2023-5-31_per_month/datesorted_train_red.jsonl'
 total = count_tokens_in_jsonl(file_path)
 print(f"Total tokens in dataset: {total}")
