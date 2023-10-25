@@ -67,15 +67,26 @@ def evaluate(args, model, df, tokenizer, rank):
                                     args), batch_size=args.eval_batch_size, shuffle=False)
 
                 for batch in iter(loader):
-                    outs = model.model.generate(
-                        batch["source_ids"].cuda(),
-                        attention_mask=batch["source_mask"].cuda(),
-                        use_cache=True,
-                        decoder_attention_mask=batch['target_mask'].cuda(),
-                        max_length=args.max_output_length,
-                        num_beams=2,
-                        early_stopping=True,
-                    )
+                    if 't5' in args.model_name_or_path:
+                        outs = model.model.generate(
+                            batch["source_ids"].cuda(),
+                            attention_mask=batch["source_mask"].cuda(),
+                            use_cache=True,
+                            decoder_attention_mask=batch['target_mask'].cuda(),
+                            max_length=args.max_output_length,
+                            num_beams=2,
+                            early_stopping=True,
+                        )
+                    else:
+                        outs = model.model.generate(
+                            batch["source_ids"].cuda(),
+                            attention_mask=batch["source_mask"].cuda(),
+                            pad_token_id=50256,
+                            use_cache=True,
+                            max_length=args.max_output_length+1,
+                            num_beams=2,
+                            early_stopping=True,
+                        )
 
                     dec = model.ids_to_clean_text(outs)
                     targets = model.ids_to_clean_text(batch['target_ids'])
@@ -100,18 +111,30 @@ def evaluate(args, model, df, tokenizer, rank):
                     lm_labels[lm_labels[:, :] == -100] = 0
 
                     with torch.no_grad():
-                        outputs = model.model(
-                            input_ids=batch['source_ids'].cuda(),
-                            attention_mask=batch['source_mask'].cuda(),
-                            labels=batch['target_ids'].cuda(),
-                            decoder_attention_mask=batch['target_mask'].cuda(),
-                            output_hidden_states=True
-                        )
-
+                        if 't5' in args.model_name_or_path:
+                            outputs = model.model(
+                                input_ids=batch['source_ids'].cuda(),
+                                attention_mask=batch['source_mask'].cuda(),
+                                labels=batch['target_ids'].cuda(),
+                                decoder_attention_mask=batch['target_mask'].cuda(),
+                                output_hidden_states=True
+                            )
+                            p_emb = outputs.encoder_last_hidden_state
+                        else:
+                            outputs = model.model(
+                                input_ids=batch['source_ids'].cuda(),
+                                attention_mask=batch['source_mask'].cuda(),
+                                labels=batch['target_ids'].cuda(),
+                                output_hidden_states=True
+                            )
+                            p_emb = outputs.hidden_states[-1]
                         g_emb = embedding_layer(lm_labels.cuda())
 
-                    p_emb = outputs.encoder_last_hidden_state
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> 9d03c14797ea537132e0c3bf4df3dd0c177748e7
                     # [B, N, L] --> [B, 1, 1] --> [B]
                     # print(torch.mean(p_emb, dim=[1, 2]).cpu().numpy())
                     m_k.extend(torch.mean(

@@ -20,13 +20,11 @@ import numpy as np
 from scipy.spatial.distance import euclidean
 import torch
 from copy import deepcopy
-from copy import deepcopy
 
 def get_dtw(m, w):
-    # # dtw, _ = fastdtw(np.array(m).reshape(len(m), 1),
-    # #                np.array(w).reshape(len(w), 1),
-    # #                dist=euclidean)
-    dtw = np.linalg.norm(np.array(m) - np.array(w))
+    # dtw, _ = fastdtw(np.array(m).reshape(len(m), 1),
+    #                np.array(w).reshape(len(w), 1),
+    #                dist=euclidean)
     dtw = np.linalg.norm(np.array(m) - np.array(w))
     return dtw
 
@@ -82,7 +80,7 @@ def train(args, Model):
         devices=args.n_gpu,
         gradient_clip_val=args.max_grad_norm,
         val_check_interval=args.val_check_interval,
-        # # callbacks=[CustomModelCheckpoint(dirpath=args.output_dir)],
+        # callbacks=[CustomModelCheckpoint(dirpath=args.output_dir)],
         strategy='ddp'
 
     )
@@ -105,27 +103,22 @@ def train(args, Model):
     writer.writerow(["Date", "EM", "BWT", "FWT", "DTW", "Forget", "Update", "Time"])
     writefile.flush()
     flag = True
-    flag = True
 
     for idx, row in train_stream_df.iterrows():
         if last_entry and last_entry != row['date'] or idx == len(train_stream_df) - 1:
             repeat_num = args.repeat_num
             if args.model_name_or_path != 'initial':
-                if args.model_name_or_path != 'initial':
                 model.set_dataset(CKLDataset(collector, 'train', tokenizer, args))
             if trainer.global_rank == 0:
-                print('=' * 50)
                 print('=' * 50)
                 print('Training -', last_entry)
                 print(f"Repeating number: {repeat_num}")
                 print(f"Coreset method: {args.coreset}")
-                print(f"Coreset method: {args.coreset}")
                 print(f"Coreset ratio: {args.coreset_ratio}")
                 start_train = time.time()
             if args.method != 'initial':
-                if args.method != 'initial':
                 trainer.fit(model)
-                    trainer.fit_loop.max_epochs += args.num_train_epochs
+                trainer.fit_loop.max_epochs += args.num_train_epochs
             if trainer.global_rank == 0:
                 train_time = time.time() - start_train
                 print(f'TRAIN TIME:{train_time}')
@@ -143,7 +136,6 @@ def train(args, Model):
                     args, model, test_stream_df[test_stream_df['date'].isin(periods)], tokenizer, trainer.global_rank)
 
 
-
                 if len(periods) == 3:
                     # metric, knowledge:
                     # 1-1 1-2
@@ -155,19 +147,13 @@ def train(args, Model):
                         update = get_dtw(k['model'][1], knowledge['model'][1])
                         bwt_res = metrics[0] - pre_metric[0]
                         fwt_res = metrics[1] - pre_metric[1]
-                        bwt_res = metrics[0] - pre_metric[0]
-                        fwt_res = metrics[1] - pre_metric[1]
 
                     if len(knowledge['model']) == 3:
                         forget = get_dtw(k['model'][0], knowledge['model'][1])
                         update = get_dtw(k['model'][1], knowledge['model'][2])
                         bwt_res = metrics[0] - pre_metric[1]
                         fwt_res = metrics[1] - pre_metric[2]
-                        bwt_res = metrics[0] - pre_metric[1]
-                        fwt_res = metrics[1] - pre_metric[2]
 
-                    # bwt.append(bwt_res)
-                    # fwt.append(fwt_res)
                     # bwt.append(bwt_res)
                     # fwt.append(fwt_res)
 
@@ -175,11 +161,7 @@ def train(args, Model):
                     print("Update:", update)
                     print('BWT:', bwt_res)
                     print('FWT:', fwt_res)
-                    print('BWT:', bwt_res)
-                    print('FWT:', fwt_res)
 
-                # dtw.append(dtw_res)
-                knowledge = deepcopy(k)
                 # dtw.append(dtw_res)
                 knowledge = deepcopy(k)
                 pre_metric = metrics
@@ -188,10 +170,7 @@ def train(args, Model):
                 else:
                     acc_idx = 1
                 # acc.append(metrics[acc_idx])
-                # acc.append(metrics[acc_idx])
                 eval_time.append(e_time)
-                print('DTW:', dtw_res)
-                print('ACC:', metrics[acc_idx])
                 print('DTW:', dtw_res)
                 print('ACC:', metrics[acc_idx])
                 print('TIME:', eval_time[-1])
@@ -200,13 +179,9 @@ def train(args, Model):
                 # writer.writerow(["Date", "EM", "BWT", "FWT", "DTW", "Forget", "Update", "Time"])
                 if first_time:
                     writer.writerow([periods[0], metrics[acc_idx], None, None, dtw_res, None, None, train_time])
-                    writer.writerow([periods[0], metrics[acc_idx], None, None, dtw_res, None, None, train_time])
                     first_time = False
                     writefile.flush()
-                    writefile.flush()
                 else:
-                    writer.writerow([periods[1], metrics[acc_idx], bwt_res, fwt_res, dtw_res, forget, update, train_time])
-                    # writer.writerow([periods[1], acc[-1], bwt[-1], fwt[-1], dtw[-1], forget, update, train_time])
                     writer.writerow([periods[1], metrics[acc_idx], bwt_res, fwt_res, dtw_res, forget, update, train_time])
                     # writer.writerow([periods[1], acc[-1], bwt[-1], fwt[-1], dtw[-1], forget, update, train_time])
                     writefile.flush()
@@ -229,7 +204,6 @@ def train(args, Model):
         collector.append(row.to_dict())
         last_entry = row['date']
 
-    writefile.close()
     writefile.close()
     trainer.strategy.barrier()
 

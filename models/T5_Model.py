@@ -48,6 +48,7 @@ class CoresetGreedy:
         dists = pairwise_distances(self.all_pts[new_indices], self.all_pts, metric='euclidean')
         self.min_distances = np.minimum(self.min_distances, np.min(dists, axis=0))
 
+    
     def sample(self, sample_ratio):
         # Calculate sample size based on the input ratio
         sample_size = int(self.dset_size * sample_ratio)
