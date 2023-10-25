@@ -124,7 +124,7 @@ def train(args, Model):
                 start_train = time.time()
             if args.method != 'initial':
                 if args.method != 'initial':
-                    trainer.fit(model)
+                trainer.fit(model)
                     trainer.fit_loop.max_epochs += args.num_train_epochs
             if trainer.global_rank == 0:
                 train_time = time.time() - start_train
