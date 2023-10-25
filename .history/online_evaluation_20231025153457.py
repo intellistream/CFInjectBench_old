@@ -131,6 +131,10 @@ def evaluate(args, model, df, tokenizer, rank):
                         g_emb = embedding_layer(lm_labels.cuda())
 
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> 9d03c14797ea537132e0c3bf4df3dd0c177748e7
                     # [B, N, L] --> [B, 1, 1] --> [B]
                     # print(torch.mean(p_emb, dim=[1, 2]).cpu().numpy())
                     m_k.extend(torch.mean(
