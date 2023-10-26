@@ -13,6 +13,6 @@ times = [
 10.01109314, 9.508162498, 7.435500622, 6.78289628, 5.366356611
 ]
 
-print(times)
+print(time)
 for i in range(54):
-    print(int(times[i]))
+    print(int(time[i-1]))

@@ -21,7 +21,27 @@ from scipy.spatial.distance import euclidean
 import torch
 from copy import deepcopy
 
+import time
+from pytorch_lightning import Callback
 
+class TimeStopping(Callback):
+    def __init__(self, max_seconds):
+        super().__init__()
+        self._max_seconds = max_seconds
+        self._start_time = None
+
+    def on_train_start(self, trainer, pl_module):
+        self._start_time = time.time()
+
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx):
+        if time.time() - self._start_time > self._max_seconds:
+            trainer.should_stop = True
+
+
+def get_time_stopping_callback(monthly_limits):
+    current_month = datetime.datetime.now().month
+    max_seconds = monthly_limits.get(current_month, 3600)  # 默认为1小时，如果月份不在提供的限制中
+    return TimeStopping(max_seconds)
 
 def get_dtw(m, w):
     # # dtw, _ = fastdtw(np.array(m).reshape(len(m), 1),
@@ -57,6 +77,20 @@ class CustomModelCheckpoint(pl.Callback):
             print(f"\nSave model in {self.save_path.format(date=self.pre_date)}")
 
 def train(args, Model):
+
+    mouth_times = [
+    453.7923808, 16.5787921, 12.03679132, 12.2418673, 12.40817165, 44.16085219, 34.86197424,
+    24.19066501, 14.18119979, 12.32171631, 11.08662486, 11.52042603, 99.33622861, 16.04942751,
+    16.45968509, 10.5712564, 8.159627199, 29.45814061, 27.82076478, 20.59491801, 17.56576467,
+    13.92666721, 10.42850018, 9.318752289, 70.7507484, 13.99418879, 12.41022134, 13.92372727,
+    9.746905565, 27.41338158, 25.96095014, 16.23118711, 12.96639991, 15.30299926, 10.02765656,
+    9.566602945, 53.04566646, 11.37578082, 11.89375114, 13.40214777, 14.38200259, 28.26993299,
+    18.7823019, 14.06039214, 13.26114821, 10.42589903, 11.56395054, 8.811854362, 25.20773315,
+    10.01109314, 9.508162498, 7.435500622, 6.78289628, 5.366356611
+    ]
+
+    
+   
     output_folder = ("/".join((args.output_log.split('/'))[:-1]))
     if not os.path.isdir(output_folder):
         os.makedirs(output_folder)
@@ -106,14 +140,18 @@ def train(args, Model):
     writer.writerow(["Date", "EM", "BWT", "FWT", "DTW", "Forget", "Update", "Time"])
     writefile.flush()
     flag = True
-    flag = True
+    flag_mouth = 0
 
     for idx, row in train_stream_df.iterrows():
+        
         if last_entry and last_entry != row['date'] or idx == len(train_stream_df) - 1:
             repeat_num = args.repeat_num
             if args.model_name_or_path != 'initial':
-                if args.model_name_or_path != 'initial':
-                    model.set_dataset(CKLDataset(collector, 'train', tokenizer, args))
+                model.set_dataset(CKLDataset(collector, 'train', tokenizer, args))
+            trainer.callbacks = [cb for cb in trainer.callbacks if not isinstance(cb, TimeStopping)]
+            time_stopping_callback = get_time_stopping_callback(int(mouth_times[flag_mouth]))
+            flag_mouth += 1
+            trainer.callbacks.append(time_stopping_callback)
             if trainer.global_rank == 0:
                 print('=' * 50)
                 print('=' * 50)
@@ -124,9 +162,8 @@ def train(args, Model):
                 print(f"Coreset ratio: {args.coreset_ratio}")
                 start_train = time.time()
             if args.method != 'initial':
-                if args.method != 'initial':
-                    trainer.fit(model)
-                    trainer.fit_loop.max_epochs += args.num_train_epochs
+                trainer.fit(model)
+                trainer.fit_loop.max_epochs += args.num_train_epochs
             if trainer.global_rank == 0:
                 train_time = time.time() - start_train
                 print(f'TRAIN TIME:{train_time}')

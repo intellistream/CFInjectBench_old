@@ -12,7 +12,6 @@ times = [
 18.7823019, 14.06039214, 13.26114821, 10.42589903, 11.56395054, 8.811854362, 25.20773315,
 10.01109314, 9.508162498, 7.435500622, 6.78289628, 5.366356611
 ]
-
-print(times)
-for i in range(54):
-    print(int(times[i]))
+time_limits = {i+1: time for i, time in enumerate(times)}
+print(time_limits)
+print(time_limits[i-1])

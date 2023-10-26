@@ -20,8 +20,7 @@ import numpy as np
 from scipy.spatial.distance import euclidean
 import torch
 from copy import deepcopy
-
-
+from copy import deepcopy
 
 def get_dtw(m, w):
     # # dtw, _ = fastdtw(np.array(m).reshape(len(m), 1),

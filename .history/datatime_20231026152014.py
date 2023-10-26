@@ -15,4 +15,4 @@ times = [
 
 print(times)
 for i in range(54):
-    print(int(times[i]))
+    print(int(times[i-1]))
