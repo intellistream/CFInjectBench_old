@@ -37,13 +37,14 @@ class TimeStopping(Callback):
     def on_train_start(self, trainer, pl_module):
         self.start_time = time.time()
 
-    def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
-        if self.skip_remaining_batches:
-            return -1  
+
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
         elapsed_time = time.time() - self.start_time
         if elapsed_time > self.stop_time:
-            self.skip_remaining_batches = True
+            trainer.train_dataloader = iter(trainer.train_dataloader)
+            total_batches = len(trainer.train_dataloader.dataset) // trainer.train_dataloader.batch_size
+            trainer.fit_loop.batch_idx = total_batches - 1
+
            
 
 
