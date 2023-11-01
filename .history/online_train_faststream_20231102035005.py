@@ -37,13 +37,13 @@ class TimeStopping(Callback):
     def on_train_start(self, trainer, pl_module):
         self.start_time = time.time()
 
-    def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
+    def on_train_batch_start(self, trainer, pl_module, batch, batch_idx, dataloader_idx):
             elapsed_time = time.time() - self.start_time
             if elapsed_time > self.stop_time:
-                 self.skip_remaining_batches = True
-            
-            if self.skip_remaining_batches and batch_idx < trainer.num_training_batches - 1:
-                 trainer.fit_loop.skip_training_batch = True
+                # 跳转到最后一个批次
+                trainer.train_dataloader = iter(trainer.train_dataloader)
+                total_batches = len(trainer.train_dataloader.dataset) // trainer.train_dataloader.batch_size
+                trainer.fit_loop.batch_idx = total_batches - 1
 
                 # 清空数据加载器的预加载缓存
                 
