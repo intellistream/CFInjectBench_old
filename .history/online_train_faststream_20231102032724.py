@@ -38,14 +38,15 @@ class TimeStopping(Callback):
         self.start_time = time.time()
 
     def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
-   
+    # 如果标志被设置，跳过此batch的训练
         if self.skip_remaining_batches:
-            return -1  
+            return -1  # 返回-1会跳过当前batch的训练
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
         elapsed_time = time.time() - self.start_time
+        print(elapsed_time)
         if elapsed_time > self.stop_time:
             self.skip_remaining_batches = True
-           
+            print(f"Stopping training after {self.stop_time} seconds.")
 
 
 

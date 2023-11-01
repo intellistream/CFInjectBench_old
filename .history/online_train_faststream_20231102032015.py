@@ -31,21 +31,19 @@ class TimeStopping(Callback):
     def __init__(self, stop_time_in_seconds):
         super(TimeStopping, self).__init__()
         self.stop_time = stop_time_in_seconds
-        self.skip_remaining_batches = False
         self.start_time = None
 
     def on_train_start(self, trainer, pl_module):
         self.start_time = time.time()
 
-    def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
-   
-        if self.skip_remaining_batches:
-            return -1  
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
         elapsed_time = time.time() - self.start_time
+        print(elapsed_time)
         if elapsed_time > self.stop_time:
-            self.skip_remaining_batches = True
-           
+            trainer.should_stop = True
+            trainer.interrupted = True
+            torch.cuda.empty_cache()
+            print(f"Stopping training after {self.stop_time} seconds.")
 
 
 
