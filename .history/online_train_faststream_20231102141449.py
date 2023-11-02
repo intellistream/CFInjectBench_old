@@ -176,9 +176,11 @@ def train(args, Model):
         if last_entry and last_entry != row['date'] or idx == len(train_stream_df) - 1:
             repeat_num = args.repeat_num
             if args.model_name_or_path != 'initial':
-                data_count = len(collector)              
-                using_count = int(data_count * ( 8 / method_times[args.method]))
+                data_count = len(collector)
+                print(len(collector))
+                using_count = int(data_count * ( 1 / method_times[args.method]))
                 collector = collector[:using_count]
+                print(len(collector))
                 model.set_dataset(CKLDataset(collector, 'train', tokenizer, args))
             # trainer.callbacks = [cb for cb in trainer.callbacks if not isinstance(cb, TimeStopping)]
             # time_stopping_callback = get_time_stopping_callback(mouth_times[flag_mouth])
