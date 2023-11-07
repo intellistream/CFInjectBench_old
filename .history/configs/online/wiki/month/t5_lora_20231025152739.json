@@ -12,7 +12,7 @@
     "method": "lora",
     "freeze_level": 1,
     "gradient_accumulation_steps": 3,
-    "ngpu": 1,
+    "ngpu": 2,
     "use_deepspeed": false,
     "use_lr_scheduling": false,
     "check_validation": false,
