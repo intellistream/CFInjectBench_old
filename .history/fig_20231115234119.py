@@ -35,9 +35,9 @@ plt.plot(df.index, df['Copa'], marker='v', label='Copa', color="blue", linewidth
 plt.plot(df.index, df['hotpot-acc'], marker='D', label='HotpotQA', color="green", linewidth=2.5)
 
 
-plt.title('Performance over Years',fontsize=16)
-plt.xlabel('Year',fontsize=16)
-plt.ylabel('Score',fontsize=16)
+plt.title('Performance over Years')
+plt.xlabel('Year')
+plt.ylabel('Score')
 plt.legend(title='Dataset')
 plt.xticks(fontsize=14)
 plt.yticks(fontsize=14)

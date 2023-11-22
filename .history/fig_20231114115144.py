@@ -23,29 +23,25 @@ df = df.transpose()
 # Plotting the data
 plt.figure(figsize=(7, 5))
 print(df)
-plt.plot(df.index, df['Wic'], marker='o', label='Wic', color="tomato", linewidth=2.5)
+plt.plot(df.index, df['Wic'], marker='o', label='Wic', color="red", width=2)
 
 # Plot for Rte
-plt.plot(df.index, df['Rte'], marker='s', label='Rte', color="orange", linewidth=2.5)
+plt.plot(df.index, df['Rte'], marker='s', label='Rte', color="orange")
 
 # Plot for Copa
-plt.plot(df.index, df['Copa'], marker='v', label='Copa', color="blue", linewidth=2.5)
+plt.plot(df.index, df['Copa'], marker='v', label='Copa', color="blue")
 
 # Plot for hotpot-acc (HotpotQA)
-plt.plot(df.index, df['hotpot-acc'], marker='D', label='HotpotQA', color="green", linewidth=2.5)
+plt.plot(df.index, df['hotpot-acc'], marker='D', label='HotpotQA', color="green")
 
 
-plt.title('Performance over Years',fontsize=16)
-plt.xlabel('Year',fontsize=16)
-plt.ylabel('Score',fontsize=16)
+plt.title('Performance over Years')
+plt.xlabel('Year')
+plt.ylabel('Score')
 plt.legend(title='Dataset')
-plt.xticks(fontsize=14)
-plt.yticks(fontsize=14)
-# 设置坐标标签字体大小
-# 设置图例字体大小
-plt.legend(fontsize=14)
+
 plt.tight_layout()
-plt.savefig('pro.pdf', bbox_inches='tight')
+plt.savefig('./performance_chart.png')
 plt.show()
 
 
