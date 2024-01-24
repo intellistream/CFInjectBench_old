@@ -83,7 +83,7 @@ def train(args, Model):
         devices=args.n_gpu,
         gradient_clip_val=args.max_grad_norm,
         val_check_interval=args.val_check_interval,
-        callbacks=[CustomModelCheckpoint(dirpath=args.output_dir)],
+        # callbacks=[CustomModelCheckpoint(dirpath=args.output_dir)],
         strategy='ddp'
 
     )
