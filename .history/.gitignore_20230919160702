@@ -1,0 +1,20 @@
+__pycache__
+
+# outpus
+outputs
+log
+lightning_logs
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
