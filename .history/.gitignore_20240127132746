@@ -83,4 +83,3 @@ ENV/
 .history/configs/online/wiki/month/flant5_recadam_20240125111436.json
 .history/configs/online/wiki/month/flant5_recadam_20240125111712.json
 dataset_from_2019_to_2023/train.jsonl
-dataset_from_2019_to_2023/code/templates.csv
