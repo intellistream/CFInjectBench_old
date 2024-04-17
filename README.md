@@ -1,4 +1,4 @@
-# OCKL
+# Fast Knowledge Injection in Large Language Models
 
 In order to reproduce our results, take the following steps:
 
