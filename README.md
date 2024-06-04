@@ -37,3 +37,6 @@ All commands should be run under the project root directory.
 - Running experiments based on GPT2 model: `sh scripts/gpt2.sh`
 - Running coreset experiments based on T5-base model: `sh scripts/coreset.sh`
 - Running K-Center selection with varing ratio: `sh scripts/ratio.sh`
+
+## Computing Metrics
+Computing the final performance of experiments: `python compute_metric.py`
