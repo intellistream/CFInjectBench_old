@@ -33,5 +33,7 @@ All commands should be run under the project root directory.
 - Running experiments based on T5-base model: `sh scripts/t5_base.sh`
 - Running experiments based on T5-large model: `sh scripts/t5_large.sh`
 - Running experiments based on Flan-T5-xl model: `sh scripts/flan.sh`
-- Running streaming setting experiments based on T5-base model: `sh scripts/stream.sh`
+- Running time constrainted setup experiments based on T5-base model: `sh scripts/stream.sh`
 - Running experiments based on GPT2 model: `sh scripts/gpt2.sh`
+- Running coreset experiments based on T5-base model: `sh scripts/coreset.sh`
+- Running K-Center selection with varing ratio: `sh scripts/ratio.sh`
