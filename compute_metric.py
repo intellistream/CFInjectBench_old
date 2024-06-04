@@ -61,7 +61,7 @@ MODE = 't5-base'
 LEN = 53
 save_for_plot = False
 norm_plot = False
-writefile = open(f'kg/temp_results.csv', 'w', newline='', encoding='utf-8')
+writefile = open(f'results.csv', 'w', newline='', encoding='utf-8')
 writer = csv.writer(writefile)
 writer.writerow(["Mode", 'Method', "EM", "BWT", "FWT", "KG", 'KAR'])
 
