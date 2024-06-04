@@ -1,5 +1,6 @@
 import copy
 import sys
+import csv
 
 import pandas as pd
 import numpy as np
@@ -16,67 +17,80 @@ def transform_csv(input_file, output_file, desired_cols):
                 parts.extend([''] * missing_cols)
             outfile.write(','.join(parts) + '\n')
 
+def six_month_value(array, gap):
+    first_value = array[0]
+    remaining_array = array[1:]
+    if len(remaining_array) % gap != 0:
+        remaining_array = remaining_array[:-(len(remaining_array) % gap)]
+
+    reshaped_array = remaining_array.reshape(-1, gap)
+
+    mean_values = np.mean(reshaped_array, axis=1)
+    final_values = np.insert(mean_values, 0, first_value)
+
+    return final_values
+
 def plot_knowledge(date, knowledge_results, output_filename):
-    # x_column：dict --> the result of world knowledge and each CL method's model knowledge
-    # y_column: list --> the name of each knowledge
     name_list = list(knowledge_results.keys())
+    gap = 4
+    date = date[::gap]
     plt.figure(figsize=(12, 5))
 
-    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#bcbd22', '#17becf']
-    linestyles = ['-', '--', '-.']
+    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#bcbd22', '#17becf','#546C75']
+    linestyles = ['-']
+    markers = ['o', '^', 's', 'x', 'D', 'p', '*', 'h', 'H', '+']
     for i in range(len(name_list)):
         color = colors[i % len(colors)]
         linestyle = linestyles[i % len(linestyles)]
-        plt.plot(date, knowledge_results[name_list[i]], label=name_list[i], color=color, linestyle=linestyle, linewidth=3)
+        marker = markers[i % len(markers)]
+        plt.plot(date, six_month_value(knowledge_results[name_list[i]], gap), label=name_list[i], color=color, marker=marker, linestyle=linestyle, linewidth=3)
 
     plt.xlabel('Date', fontsize=21)
     plt.ylabel('Number of Facts', fontsize=21)
 
     plt.legend(fontsize=16, loc='upper left', bbox_to_anchor=(1, 1))
-    plt.xticks(ticks=np.arange(len(date))[::int(len(date) / 10)], labels=np.array(date)[::int(len(date) / 10)],
-               rotation=45, fontsize=18)
+    plt.xticks(rotation=45, fontsize=18)
     plt.yticks(fontsize=18)
     plt.yscale('log')
     plt.tight_layout()
     print(f'Save figure in: {output_filename}')
     plt.savefig(f'{output_filename}.pdf', format='pdf')
     plt.show()
-s
-MODE = 't5-base'
+
+MODE = 'gpt2'
 LEN = 53
-save_for_plot = True
+save_for_plot = False
 norm_plot = False
+writefile = open(f'kg/temp_results.csv', 'w', newline='', encoding='utf-8')
+writer = csv.writer(writefile)
+writer.writerow(["Mode", 'Method', "EM", "BWT", "FWT", "KG", 'KAR'])
 
 if MODE == 't5-base':
     root = 'log/wiki/base'
-    method_name = ['initial', 'vanilla', 'recadam', 'mixreview', 'lora', 'kadapter_k=2', 'modular', 'kd']
-elif MODE == 'stream':
-    root = 'log/wiki/newstream'
-    method_name = ['vanilla_stream', 'recadam_stream', 'mixreview_stream', 'lora_stream', 'kadapter_k=2_stream',
-                   'modular_stream', 'kd_stream']
-elif MODE == 'large':
-    root = 'log/wiki/month'
-    method_name = ['vanilla_nored_large', 'recadam_nored_large', 'mixreview_nored_large', 'lora_nored_large',
-                   'kadapter_k=2_nored_large', 'modular_nored_large', 'kd_nored_large']
+    method_name = ['initial', 'vanilla', 'recadam', 'mixreview', 'lora', 'kadapter_k=2', 'modular', 'kd', 'kilm']
+elif MODE == 't5-large':
+    root = 'log/wiki/large'
+    method_name = ['initial', 'vanilla', 'recadam', 'mixreview', 'lora', 'kadapter_k=2', 'modular', 'kd', 'kilm']
 elif MODE == 'flan':
-    root = 'log/wiki/newflan'
-    method_name = ['Flan_T5_baseline_redundancy', 'Flan_T5_xl_mixreview_online', 'Flan_T5_lora', 'Flan_T5_kadapter_k=2',
-                   'Flan_T5_modular_small']
-elif MODE == 'select':
-    root = 'log/wiki/month'
-    method_name = ['T5_base_coreset_random_euc_r=0.5_red', 'T5_base_coreset_kcenter_r=0.5_red',
-                   'T5_base_coreset_model_euc_r=0.5_red']
+    root = 'log/wiki/flan'
+    method_name = ['initial', 'baseline', 'mixreview', 'lora', 'kadapter_k=2', 'modular_small', 'kilm']
+elif MODE == 'stream':
+    root = 'log/wiki/stream'
+    method_name = ['vanilla_stream', 'recadam_stream', 'mixreview_stream', 'lora_stream', 'kadapter_k=2_stream',
+                   'modular_stream', 'kd_stream', 'kilm_stream']
+elif MODE == 'coreset':
+    root = 'log/wiki/coreset'
+    method_name = ['T5_base_random_r=0.5', 'T5_base_kcenter_r=0.5', 'T5_base_model_r=0.5']
 elif MODE == 'ratio':
-    root = 'log/wiki/month'
-    method_name = ['T5_base_coreset_kcenter_euc_r=0.25', 'T5_base_coreset_kcenter_euc_r=0.5',
-                   'T5_base_coreset_kcenter_euc_r=0.75', 'vanilla_nored_euc']
+    root = 'log/wiki/ratio'
+    method_name = ['T5_base_kcenter_r=0.25', 'T5_base_kcenter_r=0.75']
 elif MODE == 'gpt2':
-    root = 'log/wiki/month'
-    method_name = ['GPT2_initial', 'GPT2_baseline', 'GPT2_recadam', 'GPT2_mixreview', 'GPT2_lora', 'GPT2_kadapter']
+    root = 'log/wiki/gpt2'
+    method_name = ['initial', 'baseline', 'recadam', 'mixreview', 'lora', 'kadapter']
 
 if save_for_plot:
     name_mapping = {'initial': 'Initial', 'vanilla':'Vanilla', 'recadam':'RecAdam', 'mixreview':'Mix-Review',
-                    'lora':'LoRA', 'kadapter_k=2':'K-Adapter', 'modular':'Modular', 'kd':'KD'}
+                    'lora':'LoRA', 'kadapter_k=2':'K-Adapter', 'modular':'Modular', 'kd':'KD', 'kilm':'KILM'}
     knowledge_results = {}
 
 for name in method_name:
@@ -116,17 +130,16 @@ for name in method_name:
         for i in range(LEN):
             model[i] = np.sum(acc[:i+1] * 0.01 * samples[:i+1])
         kg = np.mean((world - model) / world)
-        # for i in range(LEN):
-        #     kg[i] = ((model[i] - world[i]) ** 2) / (world[i] ** 2)
-        # kg = np.sqrt(np.sum(kg))
 
         if save_for_plot:
             knowledge_results[name_mapping[name]] = model / factor
 
         kg = np.mean(kg)
         em = np.mean(acc)
-        print(f'MODE: {MODE:6}\t Method: {name:<10}\t EM: {em:6.2f}\t BWT: {0:5.2f}\t '
-              f'FWT: {0:5.2f}\t KG: {kg:5.5f}\t KAR: {0:7.2f}')
+        bwt = 0.
+        fwt = 0.
+        kar = 0.
+        traintime = 0.
     else:
         acc = acc_df.iloc[:LEN].values
         fwt = result_df.loc[:LEN-1, 'FWT'].values[1:]
@@ -143,7 +156,7 @@ for name in method_name:
                 model[i] = acc[i][0] * samples[i] * 0.01
             else:
                 non_zero_len = len(acc[i][acc[i] != 0])
-                temp_bwt = acc[i][:non_zero_len] - acc[i-1][:non_zero_len]
+                temp_bwt = acc[i-1][:non_zero_len] - acc[i][:non_zero_len]
                 bwt[i] = np.mean(temp_bwt[:-1])
                 em[i] = acc[i][:non_zero_len][-1]
 
@@ -153,16 +166,18 @@ for name in method_name:
             knowledge_results[name_mapping[name]] = model / factor
 
         kg = np.mean((world - model) / world)
-        # kg = np.zeros(LEN)
-        # for i in range(LEN):
-        #     kg[i] = ((model[i] - world[i]) ** 2) / (world[i] ** 2)
-        # kg = np.sqrt(np.sum(kg))
         em = np.mean(em)
         fwt = np.mean(fwt)
         bwt = np.mean(bwt)
-        kar = (bwt + fwt) * np.sum(tokens) / np.sum(traintime)
+        kar = (bwt + fwt) * np.sum(tokens) / np.sum(traintime) * 0.01
 
-        print(f'MODE: {MODE:6}\t Method: {name:<10}\t EM: {em:6.2f}\t BWT: {bwt:5.2f}\t FWT: {fwt:5.2f}\t KG: {kg:5.5f}\t KAR: {kar:7.2f}')
+    print(f'MODE: {MODE:6}\t Method: {name:<10}\t EM: {em:6.2f}\t BWT: {bwt:5.2f}\t '
+          f'FWT: {fwt:5.2f}\t KG: {kg:5.5f}\t KAR: {kar:7.2f}\t '
+          f'Tokens:{np.sum(tokens):<10}\t Time:{np.sum(traintime):6.2f}' )
+    writer.writerow([f'{MODE}', f'{name}', f'{em:.2f}', f'{bwt:.2f}', f'{fwt:.2f}', f'{kg:.3f}', f'{kar:.2f}'])
+    writefile.flush()
+
+writefile.close()
 
 if save_for_plot:
     date = samples_df.loc[:LEN-1, 'Month'].values
