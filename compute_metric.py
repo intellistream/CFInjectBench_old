@@ -57,7 +57,7 @@ def plot_knowledge(date, knowledge_results, output_filename):
     plt.savefig(f'{output_filename}.pdf', format='pdf')
     plt.show()
 
-MODE = 'gpt2'
+MODE = 't5-base'
 LEN = 53
 save_for_plot = False
 norm_plot = False
@@ -99,8 +99,8 @@ for name in method_name:
     transform_csv(osp.join(root, name, 'acc.csv'), osp.join(root, name, 'check_acc.csv'), LEN)
     acc_df = pd.read_csv(osp.join(root, name, 'check_acc.csv'), header=None, skiprows=1).fillna(0)
 
-    token_df = pd.read_csv('kg/nored/nored_tokens.csv')
-    samples_df = pd.read_csv('kg/nored/nored_data_number.csv')
+    token_df = pd.read_csv('data_statistics/tokens.csv')
+    samples_df = pd.read_csv('data_statistics/samples.csv')
 
     tokens = token_df.loc[:LEN-1, 'Tokens'].values
     samples = samples_df.loc[:LEN-1, 'Samples'].values
@@ -119,7 +119,6 @@ for name in method_name:
         else:
             factor = np.ones(LEN)
         knowledge_results['Perfect Injection'] = world / factor
-        # knowledge_results['World'] = world / world
 
     if name == 'initial':
         acc = acc_df.iloc[0].values[:LEN]
