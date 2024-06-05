@@ -59,9 +59,9 @@ def plot_knowledge(date, knowledge_results, output_filename):
 
 MODE = 't5-base'
 LEN = 53
-save_for_plot = False
+save_for_plot = True
 norm_plot = False
-writefile = open(f'results.csv', 'w', newline='', encoding='utf-8')
+writefile = open(f'kg/temp_results.csv', 'w', newline='', encoding='utf-8')
 writer = csv.writer(writefile)
 writer.writerow(["Mode", 'Method', "EM", "BWT", "FWT", "KG", 'KAR'])
 
@@ -76,7 +76,7 @@ elif MODE == 'flan':
     method_name = ['initial', 'baseline', 'mixreview', 'lora', 'kadapter_k=2', 'modular_small', 'kilm']
 elif MODE == 'stream':
     root = 'log/wiki/stream'
-    method_name = ['vanilla_stream', 'recadam_stream', 'mixreview_stream', 'lora_stream', 'kadapter_k=2_stream',
+    method_name = ['baseline_stream', 'recadam_stream', 'mixreview_stream', 'lora_stream', 'kadapter_k=2_stream',
                    'modular_stream', 'kd_stream', 'kilm_stream']
 elif MODE == 'coreset':
     root = 'log/wiki/coreset'
@@ -89,8 +89,8 @@ elif MODE == 'gpt2':
     method_name = ['initial', 'baseline', 'recadam', 'mixreview', 'lora', 'kadapter']
 
 if save_for_plot:
-    name_mapping = {'initial': 'Initial', 'vanilla':'Vanilla', 'recadam':'RecAdam', 'mixreview':'Mix-Review',
-                    'lora':'LoRA', 'kadapter_k=2':'K-Adapter', 'modular':'Modular', 'kd':'KD', 'kilm':'KILM'}
+    name_mapping = {'initial': 'Initial', 'vanilla':'Vanilla', 'recadam':'RecAdam', 'mixreview':'MixReview',
+                    'lora':'LoRA', 'kadapter_k=2':'Kadapters (k=2)', 'modular':'Modular', 'kd':'KD', 'kilm':'KILM'}
     knowledge_results = {}
 
 for name in method_name:
@@ -149,15 +149,17 @@ for name in method_name:
         model = np.zeros(LEN)
 
         # calculate model knowledge
+        current_len = 1
         for i in range(LEN):
             if i == 0:
-                em[i] = acc[i][0]
+                em[i] = acc[i][:current_len]
                 model[i] = acc[i][0] * samples[i] * 0.01
+                current_len += 1
             else:
-                non_zero_len = len(acc[i][acc[i] != 0])
-                temp_bwt = acc[i-1][:non_zero_len] - acc[i][:non_zero_len]
-                bwt[i] = np.mean(temp_bwt[:-1])
-                em[i] = acc[i][:non_zero_len][-1]
+                temp_bwt = acc[i-1][:current_len-1] - acc[i][:current_len-1]
+                bwt[i] = np.mean(temp_bwt)
+                em[i] = acc[i][:current_len][-1]
+                current_len += 1
 
                 model[i] = np.sum(acc[i] * 0.01 * samples)
 
@@ -168,7 +170,7 @@ for name in method_name:
         em = np.mean(em)
         fwt = np.mean(fwt)
         bwt = np.mean(bwt)
-        kar = (bwt + fwt) * np.sum(tokens) / np.sum(traintime) * 0.01
+        kar = (fwt - bwt) * np.sum(tokens) / np.sum(traintime) * 0.01
 
     print(f'MODE: {MODE:6}\t Method: {name:<10}\t EM: {em:6.2f}\t BWT: {bwt:5.2f}\t '
           f'FWT: {fwt:5.2f}\t KG: {kg:5.5f}\t KAR: {kar:7.2f}\t '
@@ -180,4 +182,4 @@ writefile.close()
 
 if save_for_plot:
     date = samples_df.loc[:LEN-1, 'Month'].values
-    plot_knowledge(date=date, knowledge_results=knowledge_results, output_filename='kg/KG_ratio' if norm_plot else 'kg/KG_number')
+    plot_knowledge(date=date, knowledge_results=knowledge_results, output_filename='data_statistics/KG_ratio' if norm_plot else 'data_statistics/KG_number')
