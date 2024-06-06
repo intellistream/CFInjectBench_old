@@ -40,3 +40,6 @@ All commands should be run under the project root directory.
 
 ## Computing Metrics
 Computing the final performance of experiments: `python compute_metric.py`
+
+## Dataset Characteristics Analysis
+Computing the Cumulative Distribution Function (CDF) of the token and date changes: `python dataset_cdf.py`
