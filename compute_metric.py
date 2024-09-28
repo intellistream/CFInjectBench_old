@@ -57,9 +57,10 @@ def plot_knowledge(date, knowledge_results, output_filename):
     plt.savefig(f'{output_filename}.pdf', format='pdf')
     plt.show()
 
-MODE = 't5-base'
+MODE = 'llama'
+# LEN = 24
 LEN = 53
-save_for_plot = True
+save_for_plot = False
 norm_plot = False
 writefile = open(f'kg/temp_results.csv', 'w', newline='', encoding='utf-8')
 writer = csv.writer(writefile)
@@ -87,6 +88,13 @@ elif MODE == 'ratio':
 elif MODE == 'gpt2':
     root = 'log/wiki/gpt2'
     method_name = ['initial', 'baseline', 'recadam', 'mixreview', 'lora', 'kadapter']
+elif MODE == 'llama':
+    root = 'log/wiki/llama'
+    method_name = ['initial', 'baseline', 'lora', 'kadapter', 'recadam', 'mixreview']
+elif MODE == 'me':
+    root = 'log/wiki/me'
+    # method_name = ['t5flan_grace']
+    method_name = ['t5_grace', 't5large_grace']
 
 if save_for_plot:
     name_mapping = {'initial': 'Initial', 'vanilla':'Vanilla', 'recadam':'RecAdam', 'mixreview':'MixReview',
@@ -119,6 +127,7 @@ for name in method_name:
         else:
             factor = np.ones(LEN)
         knowledge_results['Perfect Injection'] = world / factor
+        # knowledge_results['World'] = world / world
 
     if name == 'initial':
         acc = acc_df.iloc[0].values[:LEN]
@@ -156,6 +165,10 @@ for name in method_name:
                 model[i] = acc[i][0] * samples[i] * 0.01
                 current_len += 1
             else:
+                # non_zero_len = len(acc[i][acc[i] != 0])
+                # temp_bwt = acc[i - 1][:non_zero_len] - acc[i][:non_zero_len]
+                # bwt[i] = np.mean(temp_bwt[:-1])
+                # em[i] = acc[i][:non_zero_len][-1]
                 temp_bwt = acc[i-1][:current_len-1] - acc[i][:current_len-1]
                 bwt[i] = np.mean(temp_bwt)
                 em[i] = acc[i][:current_len][-1]
