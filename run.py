@@ -36,6 +36,7 @@ if __name__ == '__main__':
 
     args_dict = dict(
         output_dir=hparam.__dict__.get('output_dir'),
+        model_editing_config=hparam.__dict__.get('model_editing_config'),
         dataset=hparam.dataset,
         dataset_version=hparam.dataset_version,
         model_name_or_path=hparam.model,
@@ -76,6 +77,8 @@ if __name__ == '__main__':
     args = argparse.Namespace(**args_dict)
     if 't5' in args.model_name_or_path:
         Model = load_model('T5')
+    elif 'llama' in args.model_name_or_path:
+        Model = load_model('Llama')
     else:
         Model = load_model('GPT2')
 

@@ -2,6 +2,7 @@
 
 import spacy
 import pandas as pd
+from transformers import LlamaTokenizer
 
 from torch.utils.data import Dataset
 
@@ -53,12 +54,17 @@ class CKLDataset(Dataset):
                 target_ = example_batch['corpus']
                 # target_ = '<extra_id_0> ' + output_text # mlm
                 # input_ = input_ + ' <extra_id_0>'
+                prompt_len = 0
             else:
                 input_ = example_batch['query'].split('_X_')
                 if len(input_[0]) == 0:
                     input_ = input_[1].strip()
                 else:
                     input_ = input_[0].strip()
+                if isinstance(self.tokenizer, LlamaTokenizer):
+                    input_ = f'Please complete this question: {input_}\nResponse: '
+                    # prompt = self.tokenizer.encode(f'Please complete this sentence: \nResponse: ')
+                    # prompt_len = len(prompt)
                 target_ = input_ + ' ' + example_batch['answer'] + '.'
 
                 if len(input_) == 0:

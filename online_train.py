@@ -6,13 +6,16 @@ import shutil
 import time
 import pytorch_lightning as pl
 from transformers import T5Tokenizer
-
+from torch.utils.data import RandomSampler
+from torch.utils.data import DataLoader
 from dataset import CKLDataset as Dataset
 from kilm_dataset import CKLDataset as KILM_Dataset
+from me_dataset import CKLDataset as ME_Dataset
 from online_evaluation import evaluate
 from utils import load_dataset
 import numpy as np
-
+from transformers import LlamaTokenizer
+from EasyEdit.easyeditor import GraceHyperParams, WISEHyperParams, BaseEditor
 
 def find_next_entry(start_idx, train_stream_df):
     next_entry = None
@@ -22,6 +25,36 @@ def find_next_entry(start_idx, train_stream_df):
                 return next_entry
             next_entry = row['date']
     return None
+
+from pytorch_lightning.callbacks import Callback
+class PrintModelParamsAndExitCallback(Callback):
+    def on_fit_start(self, trainer, pl_module):
+        total_params = sum(p.numel() for p in pl_module.parameters())
+        trainable_params = sum(p.numel() for p in pl_module.parameters() if p.requires_grad)
+        non_trainable_params = total_params - trainable_params
+
+        def format_params(num):
+            if num >= 1e9:
+                return f"{num / 1e9:.2f} B"
+            elif num >= 1e6:
+                return f"{num / 1e6:.2f} M"
+            elif num >= 1e3:
+                return f"{num / 1e3:.2f} K"
+            else:
+                return str(num)
+
+        print(f"Total params: {format_params(total_params)}")
+        print(f"Trainable params: {format_params(trainable_params)}")
+        print(f"Non-trainable params: {format_params(non_trainable_params)}")
+        import sys
+        sys.exit()
+
+import torch
+def print_gpu_memory():
+    if torch.cuda.is_available():
+        print(f"总显存: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+        print(f"已分配显存: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
+        print(f"缓存中的显存: {torch.cuda.memory_reserved() / 1e9:.2f} GB")
 
 def train(args, Model):
     output_folder = ("/".join((args.output_log.split('/'))[:-1]))
@@ -33,11 +66,27 @@ def train(args, Model):
     train_stream_df = load_dataset('train', args)
     test_stream_df = load_dataset('test', args)
 
-    model = Model(args)
-    if 't5' in args.model_name_or_path:
-        tokenizer = T5Tokenizer.from_pretrained(args.model_name_or_path)
+    if args.method not in ['wise', 'grace']:
+        model = Model(args)
+        if 't5' in args.model_name_or_path:
+            tokenizer = T5Tokenizer.from_pretrained(args.model_name_or_path)
+        else:
+            tokenizer = model.tokenizer
     else:
-        tokenizer = model.tokenizer
+        if args.method == 'wise':
+            hparams = WISEHyperParams.from_hparams(args.model_editing_config)
+        elif args.method == 'grace':
+            hparams = GraceHyperParams.from_hparams(args.model_editing_config)
+
+        editor = BaseEditor.from_hparams(hparams)
+
+        if 'llama' in args.model_name_or_path:
+            tokenizer = LlamaTokenizer.from_pretrained(args.model_name_or_path)
+            tokenizer.pad_token_id = (0)
+            tokenizer.padding_side = "left"  # Allow batched inference
+        elif 't5' in args.model_name_or_path:
+            tokenizer = T5Tokenizer.from_pretrained(args.model_name_or_path)
+
     start_time = time.time()
     collector = []
 
@@ -52,6 +101,7 @@ def train(args, Model):
         gradient_clip_val=args.max_grad_norm,
         val_check_interval=args.val_check_interval,
         callbacks=[],
+        # callbacks=[PrintModelParamsAndExitCallback()],
         enable_checkpointing=False,
         # callbacks=[CustomModelCheckpoint(dirpath=args.output_dir)],
         strategy='ddp'
@@ -81,15 +131,18 @@ def train(args, Model):
 
     if args.method == 'kilm':
         CKLDataset = KILM_Dataset
+    elif args.method in ['wise', 'grace']:
+        CKLDataset = ME_Dataset
     else:
         CKLDataset = Dataset
 
     for idx, row in train_stream_df.iterrows():
+        # if row['date'] == '2019-1':
+        #     continue
         if last_entry and last_entry != row['date'] or idx == len(train_stream_df) - 1:
             repeat_num = args.repeat_num
-            if args.model_name_or_path != 'initial':
-                if args.model_name_or_path != 'initial':
-                    model.set_dataset(CKLDataset(collector, 'train', tokenizer, args))
+            if args.method not in ['initial', 'wise', 'grace']:
+                model.set_dataset(CKLDataset(collector, 'train', tokenizer, args))
             if trainer.global_rank == 0:
                 print('=' * 50)
                 print('=' * 50)
@@ -98,9 +151,41 @@ def train(args, Model):
                 print(f"Coreset method: {args.coreset}")
                 print(f"Coreset ratio: {args.coreset_ratio}")
                 start_train = time.time()
-            if args.method != 'initial':
+            if args.method not in ['initial', 'wise', 'grace']:
                 trainer.fit(model)
                 trainer.fit_loop.max_epochs += args.num_train_epochs
+            if args.method in ['wise', 'grace']:
+                trainset = CKLDataset(collector, 'train', tokenizer, args)
+                sampler = RandomSampler(trainset)
+                dataloader = DataLoader(trainset, sampler=sampler, batch_size=args.train_batch_size,
+                                        drop_last=True, num_workers=args.num_workers)
+                prompts = []
+                target_new = []
+                loc_prompts = []
+                for i, batch in enumerate(dataloader):
+                    source = batch['source']
+                    target = batch['target']
+                    loc_prompts.extend(target)
+                    prompts.extend(source)
+                    target_new.extend(target)
+
+                    rephrase_prompts =source
+                    locality_prompts = source
+                    locality_ans = target
+                    locality_inputs = {
+                        'neighborhood': {
+                            'prompt': locality_prompts,
+                            'ground_truth': locality_ans
+                        },
+                    }
+                _, model, _ = editor.edit(
+                    prompts=prompts,
+                    # rephrase_prompts=rephrase_prompts,
+                    target_new=target_new,
+                    loc_prompts=loc_prompts,
+                    # locality_inputs=locality_inputs,
+                    sequential_edit=False  # or True
+                )
             if trainer.global_rank == 0:
                 train_time.append(time.time() - start_train)
                 print(f'TRAIN TIME:{train_time[-1]}')
@@ -152,8 +237,8 @@ def train(args, Model):
                     print('ACC:', acc[-1])
                     # print('TIME:', eval_time[-1])
 
-                    writer = csv.writer(writefile)
-                    acc_writer = csv.writer(acc_writefile)
+                    # writer = csv.writer(writefile)
+                    # acc_writer = csv.writer(acc_writefile)
                     # writer.writerow(["Date", "EM", "BWT", "FWT", "Time"])
 
                     if first_time:
