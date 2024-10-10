@@ -190,4 +190,4 @@ dependencies:
       - xxhash==3.4.1
       - yarl==1.9.2
       - zipp==3.18.2
-prefix: /home/tongjun/miniconda3/envs/OCKL
+prefix: /miniconda3/envs/OCKL
