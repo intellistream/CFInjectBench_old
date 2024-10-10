@@ -1,4 +1,4 @@
-##  Continuous Fast Knowledge Injection in Language Models: Benchmarking and Rethinking
+##  CFInjectBench: A Benchmark for Continuous Fast Knowledge Injection in Language Models
 
 ## Setup
 - Install miniconda
